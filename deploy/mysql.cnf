@@ -1,0 +1,6 @@
+[mysqld]
+character-set-server=utf8mb4
+collation-server=utf8mb4_0900_as_cs
+default-storage-engine=InnoDB
+sql-mode=STRICT_TRANS_TABLES,NO_ZERO_DATE,NO_ZERO_IN_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
+local-infile=0

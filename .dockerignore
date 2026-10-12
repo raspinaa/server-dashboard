@@ -1,0 +1,11 @@
+.git
+.venv
+.native
+**/node_modules
+**/__pycache__
+**/media
+**/state
+.env
+data
+artifacts
+**/test-results

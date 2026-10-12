@@ -1,0 +1,41 @@
+name: source-checks
+on: [push, pull_request]
+permissions: {contents: read}
+jobs:
+  backend:
+    runs-on: ubuntu-24.04
+    services:
+      mysql:
+        image: mysql:8.4.11
+        env: {MYSQL_ROOT_PASSWORD: isolated-test-root, MYSQL_DATABASE: infrahub}
+        ports: [33306:3306]
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost"
+          --health-interval=5s --health-timeout=5s --health-retries=60
+    env:
+      DJANGO_SECRET_KEY: isolated-ci-key-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+      DEBUG: '1'
+      CSRF_TRUSTED_ORIGINS: http://127.0.0.1:5173,http://localhost:5173
+      ALLOWED_HOSTS: localhost,127.0.0.1,testserver
+      MYSQL_USER: root
+      MYSQL_PASSWORD: isolated-test-root
+      MYSQL_HOST: 127.0.0.1
+      MYSQL_PORT: '33306'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: sudo apt-get update && sudo apt-get install -y default-libmysqlclient-dev pkg-config
+      - run: python -m pip install --require-hashes -r backend/requirements.lock
+      - run: echo "CREDENTIAL_KEY=$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')" >> "$GITHUB_ENV"
+      - run: python backend/manage.py check && python backend/manage.py makemigrations --check --dry-run
+      - run: python -m pytest -q
+      - run: python backend/manage.py migrate --noinput && python backend/manage.py seed_dev
+      - uses: actions/setup-node@v4
+        with: {node-version: '24', cache: npm, cache-dependency-path: frontend/package-lock.json}
+      - run: npm ci && npm test && npm run build && npx playwright install --with-deps chromium
+        working-directory: frontend
+      - run: python backend/manage.py runserver 127.0.0.1:8000 > /tmp/infrahub-backend.log 2>&1 &
+      - run: npm run test:e2e
+        working-directory: frontend
+      - run: python -c "import json,pathlib; assert pathlib.Path('VERSION').read_text().strip()==json.load(open('frontend/package.json'))['version']"

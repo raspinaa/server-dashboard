@@ -1,0 +1,2516 @@
+/**
+ * رابط فارسی/RTL موجودی؛ هر کامپوننت یک گردش کار واقعی API را پوشش می‌دهد.
+ * مجوزهای UI فقط کنترل نمایش هستند؛ backend دوباره هر درخواست را مجوزسنجی می‌کند.
+ * رمز بازیابی‌شده فقط در حافظه کوتاه‌عمر کامپوننت نگهداری می‌شود، نه storage مرورگر.
+ */
+import React, { useEffect, useState, useRef, useId, Fragment } from "react";
+import { createRoot } from "react-dom/client";
+import {
+  api,
+  download,
+  ApiError,
+  fields,
+  statusLabels,
+  roles,
+  time,
+} from "./api";
+import "./style.css";
+type Env = { id: number; name: string; archived: boolean; version: number };
+type Project = {
+  id: number;
+  name: string;
+  description: string;
+  vcenter_path: string;
+  archived: boolean;
+  version: number;
+  role: string;
+  permissions: string[];
+  environments: Env[];
+};
+type Disk = { id?: string; name: string; size: string; order: number };
+type Machine = {
+  id: string;
+  version: number;
+  environment: number;
+  environment_name: string;
+  application: string;
+  server_name: string;
+  vms: string;
+  cpu: number;
+  ram: string;
+  os: string;
+  network: string;
+  ip: string;
+  subnet: string;
+  gateway: string;
+  username: string;
+  status: string;
+  disks: Disk[];
+  has_credential: boolean;
+  archived: boolean;
+};
+type User = {
+  id: number;
+  username: string;
+  first_name: string;
+  is_admin: boolean;
+  is_active?: boolean;
+  permissions: string[];
+};
+const permLabels: Record<string, string> = {
+  export: "خروجی معمولی",
+  credential_view: "مشاهده / کپی رمز",
+  credential_edit: "تغییر رمز",
+  credential_export: "خروجی رمز",
+  manage_users: "مدیریت کاربران",
+  auth_settings: "تنظیم احراز هویت",
+  audit_view: "رویدادهای عمومی",
+  perform_updates: "به‌روزرسانی برنامه",
+};
+const dirtyEditors = new Set<string>();
+function navigate() {
+  return (
+    dirtyEditors.size === 0 || confirm("تغییرات ذخیره‌نشده کنار گذاشته شود؟")
+  );
+}
+const nav = [
+  ["inventory", "موجودی ماشین‌ها", "▦"],
+  ["projects", "پروژه‌ها و محیط‌ها", "◈"],
+  ["imports", "مرکز ورود Excel", "↓"],
+  ["exports", "مرکز خروجی Excel", "↑"],
+  ["access", "کاربران و دسترسی", "♧"],
+  ["audit", "رویدادهای سیستم", "◷"],
+  ["settings", "تنظیمات و به‌روزرسانی", "⚙"],
+];
+function App() {
+  const [user, setUser] = useState<User | null>(null),
+    [boot, setBoot] = useState(true),
+    [projects, setProjects] = useState<Project[]>([]),
+    [pid, setPid] = useState<number>(0),
+    [section, setSection] = useState("inventory"),
+    [error, setError] = useState(""),
+    [success, setSuccess] = useState(""),
+    [busy, setBusy] = useState(false),
+    [dark, setDark] = useState(false),
+    [epoch, setEpoch] = useState(0);
+  const sessionGeneration = useRef(0);
+  const project = projects.find((p) => p.id === pid);
+  const refresh = async () => {
+    const generation = sessionGeneration.current;
+    const ps = await api<Project[]>("projects/");
+    if (generation !== sessionGeneration.current) return;
+    setProjects(ps);
+    setPid((old) => (ps.some((p) => p.id === old) ? old : ps[0]?.id || 0));
+    setEpoch((e) => e + 1);
+  };
+  const run = async (fn: () => Promise<void>) => {
+    setBusy(true);
+    setError("");
+    setSuccess("");
+    try {
+      await fn();
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 403)
+        setError("دسترسی مجاز نیست یا جلسه منقضی شده است. " + e.message);
+      else if (e instanceof ApiError && e.status === 409)
+        setError(
+          "تعارض نسخه: داده تغییر کرده است. نسخه تازه را بارگذاری و تغییرات را دوباره بررسی کنید.",
+        );
+      else setError(e instanceof Error ? e.message : "خطا");
+    } finally {
+      setBusy(false);
+    }
+  };
+  useEffect(() => {
+    api("session/")
+      .then(async (s) => {
+        setUser(s.user);
+        if (s.user) await refresh();
+      })
+      .catch((e) => setError(String(e)))
+      .finally(() => setBoot(false));
+  }, []);
+  useEffect(() => {
+    document.documentElement.dataset.theme = dark ? "dark" : "light";
+  }, [dark]);
+  if (boot)
+    return (
+      <div className="loading" role="status">
+        در حال بارگذاری InfraHub…
+      </div>
+    );
+  if (!user)
+    return (
+      <main className="login">
+        <div className="brand">
+          IH <span>InfraHub</span>
+        </div>
+        <h1>ورود به فضای مدیریت موجودی</h1>
+        <p>داده‌های پروژه؛ از Excel تا همکاری تیمی</p>
+        {error && (
+          <p role="alert" className="error">
+            {error}
+          </p>
+        )}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            const f = new FormData(e.currentTarget);
+            run(async () => {
+              const s = await api("login/", "POST", Object.fromEntries(f));
+              sessionGeneration.current++;
+              setUser(s.user);
+              setSection("inventory");
+              await refresh();
+            });
+          }}
+        >
+          <label>
+            نام کاربری
+            <input name="username" autoComplete="username" required dir="ltr" />
+          </label>
+          <label>
+            رمز عبور
+            <input
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              required
+              dir="ltr"
+            />
+          </label>
+          <button disabled={busy}>ورود امن</button>
+        </form>
+        <small>ورود سازمانی پیکربندی نشده · MFA: قابلیت آینده</small>
+      </main>
+    );
+  return (
+    <div className="shell">
+      <aside>
+        <div className="brand">
+          IH{" "}
+          <span>
+            InfraHub<small>پورتال موجودی زیرساخت</small>
+          </span>
+        </div>
+        <p className="navlabel">فضای کاری</p>
+        <nav>
+          {nav
+            .filter(
+              ([k]) =>
+                !["access", "audit"].includes(k) ||
+                (k === "access" &&
+                  (user.is_admin ||
+                    user.permissions.includes("manage_users"))) ||
+                (k === "audit" &&
+                  (user.is_admin || user.permissions.includes("audit_view"))),
+            )
+            .map(([k, t, i]) => (
+              <button
+                key={k}
+                className={section === k ? "active" : ""}
+                onClick={() => {
+                  if (!navigate()) return;
+                  setSection(k);
+                  setError("");
+                  setSuccess("");
+                }}
+              >
+                <span>{i}</span>
+                {t}
+              </button>
+            ))}
+        </nav>
+        <div className="asidebottom">
+          <strong>{user.first_name || user.username}</strong>
+          <small>جلسه محلی · دسترسی پروژه‌ای</small>
+          <button
+            onClick={() =>
+              run(async () => {
+                sessionGeneration.current++;
+                await api("logout/", "POST");
+                setUser(null);
+                setProjects([]);
+                setPid(0);
+                setSection("inventory");
+              })
+            }
+          >
+            خروج از حساب
+          </button>
+        </div>
+      </aside>
+      <div className="workspace">
+        <header>
+          <div>
+            <span className="eyebrow">
+              مدیریت و همکاری / {nav.find((n) => n[0] === section)?.[1]}
+            </span>
+            <h1>{nav.find((n) => n[0] === section)?.[1]}</h1>
+          </div>
+          <div className="toolbar">
+            <label className="compact">
+              پروژه
+              <select
+                aria-label="انتخاب پروژه"
+                value={pid}
+                onChange={(e) => {
+                  if (navigate()) setPid(Number(e.target.value));
+                }}
+              >
+                <option value={0}>انتخاب پروژه</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                    {p.archived ? " (بایگانی)" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              className="ghost"
+              aria-label="تغییر ظاهر"
+              onClick={() => setDark(!dark)}
+            >
+              {dark ? "☀" : "☾"}
+            </button>
+          </div>
+        </header>
+        <main key={user.id}>
+          {error && (
+            <div role="alert" className="error">
+              {error}
+            </div>
+          )}
+          {success && (
+            <div role="status" className="success">
+              {success}
+            </div>
+          )}
+          {busy && (
+            <div role="status" className="progress">
+              در حال انجام…
+            </div>
+          )}
+          {section === "projects" ? (
+            <Projects
+              projects={projects}
+              user={user}
+              run={run}
+              refresh={refresh}
+            />
+          ) : section === "access" ? (
+            <Access
+              project={project}
+              run={run}
+              epoch={epoch}
+              refresh={refresh}
+            />
+          ) : section === "audit" ? (
+            <AuditPage run={run} />
+          ) : section === "settings" ? (
+            <Settings user={user} run={run} notice={setSuccess} />
+          ) : !project ? (
+            <div className="empty">
+              <h2>پروژه‌ای انتخاب نشده است</h2>
+              <p>
+                برای شروع یک پروژه بسازید یا از مدیر بخواهید عضویت شما را تعریف
+                کند.
+              </p>
+              <button onClick={() => setSection("projects")}>
+                مدیریت پروژه‌ها
+              </button>
+            </div>
+          ) : section === "inventory" ? (
+            <Inventory
+              key={project.id}
+              project={project}
+              epoch={epoch}
+              user={user}
+              run={run}
+              refresh={refresh}
+              notice={setSuccess}
+            />
+          ) : section === "imports" ? (
+            <Imports
+              key={project.id}
+              project={project}
+              run={run}
+              refresh={refresh}
+              notice={setSuccess}
+            />
+          ) : (
+            <Exports project={project} run={run} notice={setSuccess} />
+          )}
+        </main>
+        <footer>
+          InfraHub · منابع تخصیص‌یافته از موجودی ثبت‌شده محاسبه می‌شوند؛ پایش
+          زنده انجام نمی‌شود.
+        </footer>
+      </div>
+    </div>
+  );
+}
+type Run = (fn: () => Promise<void>) => Promise<void>;
+function Projects({
+  projects,
+  user,
+  run,
+  refresh,
+}: {
+  projects: Project[];
+  user: User;
+  run: Run;
+  refresh: () => Promise<void>;
+}) {
+  const [selected, setSelected] = useState<Project | null>(null);
+  return (
+    <>
+      <section className="panel">
+        <h2>{selected ? "ویرایش پروژه" : "تعریف پروژه"}</h2>
+        {(user.is_admin || selected) && (
+          <form
+            key={selected?.id || "new"}
+            className="formgrid"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const d = Object.fromEntries(new FormData(e.currentTarget));
+              run(async () => {
+                await api(
+                  selected ? `projects/${selected.id}/` : "projects/",
+                  selected ? "PATCH" : "POST",
+                  {
+                    ...d,
+                    version: selected?.version,
+                    archived: d.archived === "on",
+                  },
+                );
+                setSelected(null);
+                await refresh();
+              });
+            }}
+          >
+            <label>
+              نام پروژه
+              <input
+                name="name"
+                defaultValue={selected?.name}
+                required
+                maxLength={180}
+              />
+            </label>
+            <label>
+              مسیر توصیفی vCenter
+              <input
+                name="vcenter_path"
+                dir="ltr"
+                defaultValue={selected?.vcenter_path}
+              />
+            </label>
+            <label className="wide">
+              شرح
+              <textarea
+                name="description"
+                defaultValue={selected?.description}
+              />
+            </label>
+            {selected && (
+              <label className="check">
+                <input
+                  name="archived"
+                  type="checkbox"
+                  defaultChecked={selected.archived}
+                />
+                بایگانی پروژه
+              </label>
+            )}
+            <div className="wide actions">
+              <button>ذخیره پروژه</button>
+              {selected && (
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => setSelected(null)}
+                >
+                  لغو
+                </button>
+              )}
+            </div>
+          </form>
+        )}
+      </section>
+      <div className="cards">
+        {projects.map((p) => (
+          <section className="panel" key={p.id}>
+            <h2>
+              {p.name} {p.archived && <small>بایگانی</small>}
+            </h2>
+            <p>{p.description || "بدون شرح"}</p>
+            <p dir="ltr" className="muted">
+              {p.vcenter_path || "—"}
+            </p>
+            <small>
+              نقش شما: {roles[p.role]} · نسخه {p.version}
+            </small>
+            {p.role === "manager" && (
+              <>
+                <button className="ghost" onClick={() => setSelected(p)}>
+                  ویرایش پروژه
+                </button>
+                <h3>محیط‌ها</h3>
+                {p.environments.map((env) => (
+                  <EnvironmentRow
+                    key={env.id + "-" + env.version}
+                    env={env}
+                    project={p}
+                    run={run}
+                    refresh={refresh}
+                  />
+                ))}
+                <form
+                  className="inlineform"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const f = e.currentTarget,
+                      name = new FormData(f).get("name");
+                    run(async () => {
+                      await api(`projects/${p.id}/environments/`, "POST", {
+                        name,
+                      });
+                      f.reset();
+                      await refresh();
+                    });
+                  }}
+                >
+                  <input
+                    name="name"
+                    aria-label="نام محیط جدید"
+                    placeholder="محیط جدید، مثلاً Staging"
+                    required
+                  />
+                  <button>افزودن</button>
+                </form>
+              </>
+            )}
+          </section>
+        ))}
+      </div>
+    </>
+  );
+}
+function EnvironmentRow({
+  env,
+  project,
+  run,
+  refresh,
+}: {
+  env: Env;
+  project: Project;
+  run: Run;
+  refresh: () => Promise<void>;
+}) {
+  return (
+    <form
+      className="inlineform"
+      onSubmit={(e) => {
+        e.preventDefault();
+        const d = Object.fromEntries(new FormData(e.currentTarget));
+        run(async () => {
+          await api(`projects/${project.id}/environments/`, "PATCH", {
+            id: env.id,
+            version: env.version,
+            name: d.name,
+            archived: d.archived === "on",
+          });
+          await refresh();
+        });
+      }}
+    >
+      <input
+        aria-label="نام محیط"
+        name="name"
+        defaultValue={env.name}
+        required
+      />
+      <label className="check">
+        <input name="archived" type="checkbox" defaultChecked={env.archived} />
+        بایگانی
+      </label>
+      <button className="ghost">ذخیره</button>
+    </form>
+  );
+}
+function Inventory({
+  project,
+  epoch,
+  user,
+  run,
+  refresh,
+  notice,
+}: {
+  project: Project;
+  epoch: number;
+  user: User;
+  run: Run;
+  refresh: () => Promise<void>;
+  notice: (s: string) => void;
+}) {
+  const [env, setEnv] = useState(""),
+    [search, setSearch] = useState(""),
+    [page, setPage] = useState(1),
+    [rows, setRows] = useState<Machine[]>([]),
+    [count, setCount] = useState(0),
+    [stats, setStats] = useState<any>(null),
+    [expanded, setExpanded] = useState(""),
+    [creating, setCreating] = useState(false),
+    [loading, setLoading] = useState(true);
+  const canEdit =
+    ["editor", "manager"].includes(project.role) && !project.archived;
+  useEffect(() => {
+    let live = true;
+    setLoading(true);
+    run(async () => {
+      const [r, s] = await Promise.all([
+        api(
+          `projects/${project.id}/machines/?environment=${env}&search=${encodeURIComponent(search)}&page=${page}`,
+        ),
+        api(`projects/${project.id}/overview/?environment=${env}`),
+      ]);
+      if (live) {
+        setRows(r.results);
+        setCount(r.count);
+        setStats(s);
+        setLoading(false);
+      }
+    });
+    return () => {
+      live = false;
+      setExpanded("");
+    };
+  }, [project.id, env, search, page, epoch]);
+  const max = Math.max(2, ...rows.map((m) => m.disks.length));
+  return (
+    <>
+      <div className="intro">
+        <div>
+          <span className="eyebrow">PROJECT OVERVIEW</span>
+          <h2>{project.name}</h2>
+          <p>
+            {project.description ||
+              "موجودی، منابع تخصیص‌یافته و فعالیت تیم در یک نگاه"}
+          </p>
+        </div>
+        <span className="badge">{roles[project.role]}</span>
+      </div>
+      {stats && (
+        <>
+          <div className="metrics">
+            {[
+              ["machines", "ماشین", ""],
+              ["cpu", "CPU", "Core"],
+              ["ram", "RAM", "GB"],
+              ["disk", "دیسک", "GB"],
+            ].map(([k, l, u]) => (
+              <div className="metric" key={k}>
+                <span>{l} کل پروژه</span>
+                <strong>
+                  {Number(stats.project[k]).toLocaleString("fa-IR")}{" "}
+                  <small>{u}</small>
+                </strong>
+                <small>
+                  محیط انتخابی:{" "}
+                  {Number(stats.selected[k]).toLocaleString("fa-IR")} {u}
+                </small>
+              </div>
+            ))}
+          </div>
+          <section className="panel">
+            <div className="sectionhead">
+              <h3>توزیع منابع ثبت‌شده در محیط‌ها</h3>
+              <small>
+                {project.environments.filter((e) => !e.archived).length} محیط ·
+                ظرفیت تخصیص‌یافته
+              </small>
+            </div>
+            <div className="graphs">
+              {[
+                ["cpu", "CPU · Core"],
+                ["ram", "RAM · GB"],
+                ["disk", "Disk · GB"],
+              ].map(([k, l]) => (
+                <div key={k}>
+                  <h4 dir="ltr">{l}</h4>
+                  {stats.environments.map((e: any) => (
+                    <button
+                      className="barrow"
+                      key={e.id}
+                      onClick={() => {
+                        setEnv(String(e.id));
+                        setPage(1);
+                      }}
+                      aria-label={`${e.name} ${e[k]} ${l}`}
+                    >
+                      <span>{e.name}</span>
+                      <div className="bartrack">
+                        <i
+                          style={{
+                            width:
+                              Math.max(
+                                0,
+                                (100 * Number(e[k])) /
+                                  Math.max(
+                                    1,
+                                    ...stats.environments.map((x: any) =>
+                                      Number(x[k]),
+                                    ),
+                                  ),
+                              ) + "%",
+                          }}
+                        />
+                      </div>
+                      <b>{Number(e[k]).toLocaleString("fa-IR")}</b>
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </div>
+            <div className="statuscounts">
+              {Object.entries(stats.selected.statuses).map(([k, v]) => (
+                <span key={k} className={"badge " + k}>
+                  {statusLabels[k]}: {String(v)}
+                </span>
+              ))}
+            </div>
+          </section>
+        </>
+      )}
+      <section className="panel inventory">
+        <div className="sectionhead">
+          <div>
+            <h2>
+              ماشین‌ها <small>{count.toLocaleString("fa-IR")} رکورد</small>
+            </h2>
+            <div className="tabs">
+              <button
+                className={!env ? "selected" : ""}
+                onClick={() => {
+                  setEnv("");
+                  setPage(1);
+                }}
+              >
+                همه محیط‌ها
+              </button>
+              {project.environments
+                .filter((e) => !e.archived)
+                .map((e) => (
+                  <button
+                    key={e.id}
+                    className={env === String(e.id) ? "selected" : ""}
+                    onClick={() => {
+                      setEnv(String(e.id));
+                      setPage(1);
+                    }}
+                  >
+                    {e.name}
+                  </button>
+                ))}
+            </div>
+          </div>
+          <div className="actions">
+            <input
+              aria-label="جستجوی نام سرور"
+              placeholder="جستجوی Server Name…"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
+            />
+            {canEdit && (
+              <button onClick={() => setCreating(!creating)}>
+                ＋ ماشین جدید
+              </button>
+            )}
+          </div>
+        </div>
+        {creating && (
+          <MachineEditor
+            project={project}
+            run={run}
+            done={async () => {
+              setCreating(false);
+              await refresh();
+            }}
+          />
+        )}
+        {loading ? (
+          <div role="status" className="empty">
+            در حال بارگذاری…
+          </div>
+        ) : !rows.length ? (
+          <div className="empty">ماشینی در این انتخاب ثبت نشده است.</div>
+        ) : (
+          <div
+            className="tablewrap"
+            tabIndex={0}
+            aria-label="جدول موجودی قابل پیمایش"
+          >
+            <table>
+              <thead>
+                <tr>
+                  {[
+                    "ردیف",
+                    "Environment",
+                    "Server Name",
+                    "Application",
+                    "VMs",
+                    "CPU (Core)",
+                    "RAM (GB)",
+                    ...Array.from(
+                      { length: max },
+                      (_, i) => `Disk ${i + 1} (GB)`,
+                    ),
+                    "OS",
+                    "Network / VLAN",
+                    "Server IP Addr",
+                    "Subnet (CIDR)",
+                    "GW IP Addr",
+                    "Username",
+                    "رمز",
+                    "وضعیت",
+                  ].map((h) => (
+                    <th key={h} className={h === "Server Name" ? "sticky" : ""}>
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((m, i) => (
+                  <Fragment key={m.id}>
+                    <tr className={expanded === m.id ? "expanded" : ""}>
+                      <td>{(page - 1) * 100 + i + 1}</td>
+                      <td>{m.environment_name}</td>
+                      <td className="sticky">
+                        <button
+                          className="serverlink"
+                          aria-label={"مشخصات ماشین " + m.server_name}
+                          aria-expanded={expanded === m.id}
+                          onClick={() =>
+                            setExpanded(expanded === m.id ? "" : m.id)
+                          }
+                        >
+                          {expanded === m.id ? "▾" : "◂"} {m.server_name}
+                        </button>
+                      </td>
+                      <td>{m.application || "—"}</td>
+                      <td>{m.vms || "—"}</td>
+                      <td>{m.cpu}</td>
+                      <td>{m.ram}</td>
+                      {Array.from({ length: max }, (_, d) => (
+                        <td key={d} title={m.disks[d]?.name}>
+                          {m.disks[d]?.size || "—"}
+                        </td>
+                      ))}
+                      {[
+                        "os",
+                        "network",
+                        "ip",
+                        "subnet",
+                        "gateway",
+                        "username",
+                      ].map((k) => (
+                        <td dir="ltr" key={k}>
+                          {String(m[k as keyof Machine] || "—")}
+                        </td>
+                      ))}
+                      <td>
+                        <InlineCredential
+                          machine={m}
+                          project={project}
+                          run={run}
+                          notice={notice}
+                        />
+                      </td>
+                      <td>
+                        <span className={"badge " + m.status}>
+                          {statusLabels[m.status]}
+                        </span>
+                      </td>
+                    </tr>
+                    {expanded === m.id && (
+                      <tr>
+                        <td colSpan={17 + max} className="detailcell">
+                          <MachineDetail
+                            key={m.id + "-" + m.version}
+                            machine={m}
+                            project={project}
+                            user={user}
+                            run={run}
+                            refresh={refresh}
+                            notice={notice}
+                          />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <div className="pagination">
+          <button
+            disabled={page <= 1}
+            className="ghost"
+            onClick={() => setPage(page - 1)}
+          >
+            قبلی
+          </button>
+          <span>
+            صفحه {page} از {Math.max(1, Math.ceil(count / 100))}
+          </span>
+          <button
+            disabled={page * 100 >= count}
+            className="ghost"
+            onClick={() => setPage(page + 1)}
+          >
+            بعدی
+          </button>
+        </div>
+      </section>
+    </>
+  );
+}
+function MachineEditor({
+  project,
+  machine,
+  run,
+  done,
+}: {
+  project: Project;
+  machine?: Machine;
+  run: Run;
+  done: () => Promise<void>;
+}) {
+  const [disks, setDisks] = useState<Disk[]>(
+      machine?.disks.map((d) => ({ ...d })) || [],
+    ),
+    [dirty, setDirty] = useState(false),
+    [stale, setStale] = useState(false);
+  useEffect(() => {
+    const h = (e: BeforeUnloadEvent) => {
+      if (dirty) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", h);
+    return () => window.removeEventListener("beforeunload", h);
+  }, [dirty]);
+  const editId = useId();
+  useEffect(() => {
+    if (dirty) dirtyEditors.add(editId);
+    else dirtyEditors.delete(editId);
+    return () => {
+      dirtyEditors.delete(editId);
+    };
+  }, [dirty, editId]);
+  const groups = [
+    [
+      "هویت و سرویس",
+      ["server_name", "environment", "application", "vms", "os"],
+    ],
+    ["منابع تخصیص‌یافته", ["cpu", "ram"]],
+    ["شبکه", ["network", "ip", "subnet", "gateway", "username"]],
+    ["گردش کار", ["status", "archived"]],
+  ] as const;
+  return (
+    <form
+      className="editor"
+      onChange={() => setDirty(true)}
+      onSubmit={(e) => {
+        e.preventDefault();
+        const data: any = Object.fromEntries(new FormData(e.currentTarget));
+        data.cpu = Number(data.cpu);
+        data.environment = Number(data.environment);
+        data.archived = data.archived === "on";
+        data.version = machine?.version;
+        data.disks = disks.map((d, i) => ({ ...d, order: i }));
+        run(async () => {
+          try {
+            const r = await api(
+              machine
+                ? `machines/${machine.id}/`
+                : `projects/${project.id}/machines/`,
+              machine ? "PATCH" : "POST",
+              data,
+            );
+            setDirty(false);
+            if (r.warnings.length) window.alert(r.warnings.join("\n"));
+            await done();
+          } catch (e) {
+            if (e instanceof ApiError && e.status === 409) setStale(true);
+            throw e;
+          }
+        });
+      }}
+    >
+      {groups.map(([title, ks]) => (
+        <fieldset key={title}>
+          <legend>{title}</legend>
+          <div className="formgrid">
+            {ks.map((k) => (
+              <label key={k} className={k === "archived" ? "check" : ""}>
+                {fields[k]}
+                {k === "environment" ? (
+                  <select
+                    name={k}
+                    defaultValue={
+                      machine?.environment ||
+                      project.environments.find((e) => !e.archived)?.id
+                    }
+                    required
+                  >
+                    <option value="">انتخاب محیط</option>
+                    {project.environments
+                      .filter((e) => !e.archived)
+                      .map((e) => (
+                        <option key={e.id} value={e.id}>
+                          {e.name}
+                        </option>
+                      ))}
+                  </select>
+                ) : k === "status" ? (
+                  <select name={k} defaultValue={machine?.status || "planned"}>
+                    {Object.entries(statusLabels).map(([v, l]) => (
+                      <option key={v} value={v}>
+                        {l}
+                      </option>
+                    ))}
+                  </select>
+                ) : k === "archived" ? (
+                  <input
+                    name={k}
+                    type="checkbox"
+                    defaultChecked={machine?.archived}
+                  />
+                ) : (
+                  <input
+                    name={k}
+                    dir="ltr"
+                    type={["cpu", "ram"].includes(k) ? "number" : "text"}
+                    min={0}
+                    step={k === "ram" ? ".01" : "1"}
+                    required={k === "server_name"}
+                    defaultValue={String(machine?.[k as keyof Machine] ?? "")}
+                    maxLength={k === "vms" ? 240 : 180}
+                  />
+                )}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      ))}
+      <fieldset>
+        <legend>دیسک‌ها · هر دیسک مستقل</legend>
+        {disks.map((d, i) => (
+          <div className="diskrow" key={d.id || "new" + i}>
+            <label>
+              نام
+              <input
+                value={d.name}
+                required
+                onChange={(e) =>
+                  setDisks(
+                    disks.map((x, n) =>
+                      n === i ? { ...x, name: e.target.value } : x,
+                    ),
+                  )
+                }
+              />
+            </label>
+            <label>
+              GB
+              <input
+                type="number"
+                value={d.size}
+                required
+                min="0.01"
+                step=".01"
+                onChange={(e) =>
+                  setDisks(
+                    disks.map((x, n) =>
+                      n === i ? { ...x, size: e.target.value } : x,
+                    ),
+                  )
+                }
+              />
+            </label>
+            <button
+              type="button"
+              className="ghost"
+              disabled={i === 0}
+              aria-label="جابجایی دیسک به بالا"
+              onClick={() => {
+                const a = [...disks];
+                [a[i - 1], a[i]] = [a[i], a[i - 1]];
+                setDisks(a);
+                setDirty(true);
+              }}
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              className="danger"
+              onClick={() => {
+                setDisks(disks.filter((_, n) => n !== i));
+                setDirty(true);
+              }}
+            >
+              حذف
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          className="ghost"
+          onClick={() => {
+            setDisks([
+              ...disks,
+              {
+                name: `Disk ${disks.length + 1}`,
+                size: "20",
+                order: disks.length,
+              },
+            ]);
+            setDirty(true);
+          }}
+        >
+          ＋ دیسک
+        </button>
+      </fieldset>
+      {stale && (
+        <div role="alert" className="error">
+          نسخه فرم قدیمی است. تغییرات خود را یادداشت و رکورد را دوباره باز کنید.
+          <button
+            type="button"
+            onClick={() => {
+              if (confirm("تغییرات ذخیره‌نشده کنار گذاشته شود؟")) done();
+            }}
+          >
+            بارگذاری نسخه تازه
+          </button>
+        </div>
+      )}
+      <div className="actions">
+        <button disabled={stale}>ذخیره {dirty ? "تغییرات" : ""}</button>
+        <button
+          className="ghost"
+          type="button"
+          onClick={() => {
+            if (!dirty || confirm("تغییرات ذخیره‌نشده کنار گذاشته شود؟"))
+              done();
+          }}
+        >
+          بستن
+        </button>
+      </div>
+    </form>
+  );
+}
+function InlineCredential({
+  machine,
+  project,
+  run,
+  notice,
+}: {
+  machine: Machine;
+  project: Project;
+  run: Run;
+  notice: (s: string) => void;
+}) {
+  const [secret, setSecret] = useState(""),
+    [manual, setManual] = useState(false);
+  useEffect(() => {
+    if (!secret) return;
+    const timer = setTimeout(() => {
+      setSecret("");
+      setManual(false);
+    }, 15000);
+    return () => clearTimeout(timer);
+  }, [secret]);
+  useEffect(() => {
+    const clear = () => {
+      setSecret("");
+      setManual(false);
+    };
+    document.addEventListener("visibilitychange", clear);
+    return () => {
+      clear();
+      document.removeEventListener("visibilitychange", clear);
+    };
+  }, [machine.id]);
+  if (!machine.has_credential) return <>—</>;
+  if (!project.permissions.includes("credential_view")) return <>••••••</>;
+  const retrieve = (action: "reveal" | "copy") =>
+    run(async () => {
+      const r = await api(`machines/${machine.id}/credential/`, "POST", {
+        action,
+      });
+      if (action === "reveal") {
+        setSecret(r.password);
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(r.password);
+        notice("رمز کپی شد");
+      } catch {
+        setSecret(r.password);
+        setManual(true);
+      }
+    });
+  return (
+    <div className="inlinecredential">
+      <span>{secret ? "" : "••••••"}</span>
+      <button
+        className="ghost"
+        aria-label={"نمایش رمز " + machine.server_name}
+        onClick={() => retrieve("reveal")}
+      >
+        نمایش
+      </button>
+      <button
+        className="ghost"
+        aria-label={"کپی رمز " + machine.server_name}
+        onClick={() => retrieve("copy")}
+      >
+        کپی
+      </button>
+      {secret && (
+        <input
+          aria-label={"رمز بازیابی‌شده " + machine.server_name}
+          dir="ltr"
+          readOnly
+          value={secret}
+          onFocus={(e) => e.target.select()}
+        />
+      )}{" "}
+      {manual && <small>متن را برای کپی دستی انتخاب کنید.</small>}
+    </div>
+  );
+}
+function CredentialControls({
+  machine,
+  project,
+  run,
+  refresh,
+  notice,
+}: {
+  machine: Machine;
+  project: Project;
+  run: Run;
+  refresh: () => Promise<void>;
+  notice: (s: string) => void;
+}) {
+  const [secret, setSecret] = useState(""),
+    [fallback, setFallback] = useState(false),
+    [editing, setEditing] = useState(false);
+  useEffect(() => {
+    if (!secret) return;
+    const id = setTimeout(() => {
+      setSecret("");
+      setFallback(false);
+    }, 15000);
+    return () => {
+      clearTimeout(id);
+    };
+  }, [secret]);
+  useEffect(() => {
+    const clear = () => {
+      setSecret("");
+      setFallback(false);
+    };
+    document.addEventListener("visibilitychange", clear);
+    return () => {
+      clear();
+      document.removeEventListener("visibilitychange", clear);
+    };
+  }, [machine.id]);
+  return (
+    <div className="credentials">
+      <h4>اعتبارنامه ماشین</h4>
+      <p className="muted">
+        بازیابی با مجوز مستقل · نمایش ۱۵ ثانیه · ثبت رویداد بدون مقدار رمز
+      </p>
+      {project.permissions.includes("credential_view") && (
+        <div className="actions">
+          <button
+            className="ghost"
+            onClick={() =>
+              run(async () => {
+                const r = await api(
+                  `machines/${machine.id}/credential/`,
+                  "POST",
+                  { action: "reveal" },
+                );
+                setSecret(r.password);
+              })
+            }
+          >
+            نمایش رمز
+          </button>
+          <button
+            className="ghost"
+            onClick={() =>
+              run(async () => {
+                const r = await api(
+                  `machines/${machine.id}/credential/`,
+                  "POST",
+                  { action: "copy" },
+                );
+                try {
+                  await navigator.clipboard.writeText(r.password);
+                  notice("رمز کپی شد");
+                } catch {
+                  setSecret(r.password);
+                  setFallback(true);
+                }
+              })
+            }
+          >
+            کپی
+          </button>
+          {secret && (
+            <input
+              aria-label="رمز بازیابی‌شده"
+              readOnly
+              value={secret}
+              dir="ltr"
+              onFocus={(e) => e.target.select()}
+            />
+          )}{" "}
+          {fallback && (
+            <small>کپی خودکار ممکن نیست؛ متن را انتخاب و دستی کپی کنید.</small>
+          )}
+        </div>
+      )}
+      {project.permissions.includes("credential_edit") && (
+        <>
+          <button className="ghost" onClick={() => setEditing(!editing)}>
+            ویرایش رمز / مرجع
+          </button>
+          {editing && (
+            <form
+              className="inlineform"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const f = e.currentTarget;
+                run(async () => {
+                  await api(`machines/${machine.id}/credential/`, "PUT", {
+                    ...Object.fromEntries(new FormData(f)),
+                    version: machine.version,
+                  });
+                  f.reset();
+                  setEditing(false);
+                  setSecret("");
+                  await refresh();
+                  notice("اعتبارنامه تغییر کرد");
+                });
+              }}
+            >
+              <input
+                name="password"
+                type="password"
+                aria-label="رمز ماشین جدید"
+                autoComplete="off"
+                placeholder="رمز جدید"
+              />
+              <input
+                name="secret_reference"
+                aria-label="مرجع مخزن رمز"
+                placeholder="یا مرجع مخزن رمز"
+              />
+              <button>ذخیره اعتبارنامه</button>
+            </form>
+          )}
+        </>
+      )}
+      {!project.permissions.includes("credential_view") && (
+        <small>مجوز مشاهده رمز ندارید.</small>
+      )}
+    </div>
+  );
+}
+function MachineDetail({
+  machine,
+  project,
+  user,
+  run,
+  refresh,
+  notice,
+}: {
+  machine: Machine;
+  project: Project;
+  user: User;
+  run: Run;
+  refresh: () => Promise<void>;
+  notice: (s: string) => void;
+}) {
+  const [tab, setTab] = useState("activity"),
+    [events, setEvents] = useState<any[]>([]);
+  const load = async () =>
+    setEvents(await api(`machines/${machine.id}/activity/`));
+  useEffect(() => {
+    run(load);
+  }, [machine.id]);
+  return (
+    <div className="details">
+      <div className="sectionhead">
+        <strong dir="ltr">
+          {machine.server_name} <small>{machine.id}</small>
+        </strong>
+        <div className="tabs">
+          <button
+            className={tab === "activity" ? "selected" : ""}
+            onClick={() => setTab("activity")}
+          >
+            فعالیت و نظرها
+          </button>
+          <button
+            className={tab === "specs" ? "selected" : ""}
+            onClick={() => setTab("specs")}
+          >
+            مشخصات و ویرایش
+          </button>
+        </div>
+      </div>
+      {tab === "specs" ? (
+        <>
+          {["editor", "manager"].includes(project.role) && !project.archived ? (
+            <MachineEditor
+              project={project}
+              machine={machine}
+              run={run}
+              done={refresh}
+            />
+          ) : (
+            <p>مشخصات در جدول نمایش داده شده‌اند؛ مجوز ویرایش ندارید.</p>
+          )}
+          <CredentialControls
+            machine={machine}
+            project={project}
+            run={run}
+            refresh={refresh}
+            notice={notice}
+          />
+        </>
+      ) : (
+        <>
+          {project.role !== "viewer" && (
+            <form
+              className="commentform"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const f = e.currentTarget;
+                run(async () => {
+                  await api(
+                    `machines/${machine.id}/activity/`,
+                    "POST",
+                    Object.fromEntries(new FormData(f)),
+                  );
+                  f.reset();
+                  await load();
+                });
+              }}
+            >
+              <textarea
+                aria-label="متن نظر یا کار انجام‌شده"
+                name="comment"
+                placeholder="چه کاری انجام شد؟ نظر یا فعالیت را بنویسید…"
+                required
+              />
+              <div className="actions">
+                <select name="event" aria-label="نوع فعالیت">
+                  <option value="comment">نظر</option>
+                  <option value="completed_work">کار انجام‌شده</option>
+                </select>
+                <button>ثبت فعالیت</button>
+              </div>
+            </form>
+          )}
+          <div className="timeline">
+            {events.length === 0 ? (
+              <p>هنوز فعالیتی ثبت نشده است.</p>
+            ) : (
+              events.map((a) => (
+                <article key={a.id}>
+                  <div>
+                    <b>{a.author}</b> <span className="badge">{a.event}</span>
+                    <small>
+                      {time(a.timestamp)} · {a.source}
+                    </small>
+                  </div>
+                  <p>{a.comment}</p>
+                  {a.changes.length > 0 && (
+                    <table className="changes">
+                      <thead>
+                        <tr>
+                          <th>فیلد</th>
+                          <th>قبلی</th>
+                          <th>جدید</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {a.changes.map((c: any, i: number) => (
+                          <tr key={i}>
+                            <td>{fields[c.field] || c.field}</td>
+                            <td>
+                              <code>{JSON.stringify(c.previous)}</code>
+                            </td>
+                            <td>
+                              <code>{JSON.stringify(c.value)}</code>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                  {["comment", "completed_work"].includes(a.event) &&
+                    (a.author_id === user.id || project.role === "manager") && (
+                      <button
+                        className="ghost"
+                        onClick={() => {
+                          const comment = prompt(
+                            "متن جدید (نسخه قبلی حفظ می‌شود)",
+                            a.comment,
+                          );
+                          if (comment)
+                            run(async () => {
+                              await api(
+                                `machines/${machine.id}/activity/`,
+                                "PATCH",
+                                { id: a.id, version: a.version, comment },
+                              );
+                              await load();
+                            });
+                        }}
+                      >
+                        ویرایش نظر
+                      </button>
+                    )}
+                  {a.revisions.length > 0 && (
+                    <details>
+                      <summary>نسخه‌های قبلی نظر</summary>
+                      {a.revisions.map((r: any, i: number) => (
+                        <p key={i}>
+                          {r.previous} · {r.author__username} ·{" "}
+                          {time(r.created_at)}
+                        </p>
+                      ))}
+                    </details>
+                  )}
+                </article>
+              ))
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+function Imports({
+  project,
+  run,
+  refresh,
+  notice,
+}: {
+  project: Project;
+  run: Run;
+  refresh: () => Promise<void>;
+  notice: (s: string) => void;
+}) {
+  const [batch, setBatch] = useState<any>(null),
+    [sheet, setSheet] = useState(""),
+    [mapping, setMapping] = useState<Record<string, string>>({}),
+    [header, setHeader] = useState(1),
+    [mode, setMode] = useState("add_only"),
+    [rows, setRows] = useState<any[]>([]),
+    [decisions, setDecisions] = useState<Record<string, any>>({}),
+    [history, setHistory] = useState<any[]>([]);
+  const load = async () =>
+    setHistory(await api(`projects/${project.id}/imports/`));
+  useEffect(() => {
+    if (project.role === "manager") run(load);
+  }, [project.id]);
+  const selectSheet = (b: any, name: string) => {
+    setSheet(name);
+    const s = b.sheets.find((s: any) => s.name === name);
+    setMapping(s.mapping);
+    setHeader(s.header_row);
+  };
+  const patch = (r: any, value: any) =>
+    setDecisions((d) => ({ ...d, [r.row]: { ...d[r.row], ...value } }));
+  if (project.role !== "manager")
+    return (
+      <div className="empty">ورود Excel به مجوز مدیر پروژه نیاز دارد.</div>
+    );
+  return (
+    <>
+      <section className="panel">
+        <h2>مرکز ورود Excel</h2>
+        <p>
+          انتخاب فایل ← نگاشت ستون‌ها ← اعتبارسنجی ← تصمیم صریح ← ورود تراکنشی
+        </p>
+        <p className="muted">
+          XLSX، حداکثر ۱۰٬۰۰۰ ردیف؛ فرمول و ماکرو پذیرفته نمی‌شود. فایل اصلی
+          به‌صورت رمزگذاری‌شده نگهداری می‌شود.
+        </p>
+        <form
+          className="inlineform"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const f = new FormData(e.currentTarget);
+            run(async () => {
+              const b = await api(`projects/${project.id}/imports/`, "POST", f);
+              setBatch(b);
+              selectSheet(b, b.sheets[0].name);
+              setRows([]);
+              setDecisions({});
+              await load();
+            });
+          }}
+        >
+          <input
+            aria-label="فایل XLSX"
+            name="file"
+            type="file"
+            accept=".xlsx"
+            required
+          />
+          <button disabled={project.archived}>بارگذاری</button>
+        </form>
+        {batch && (
+          <>
+            <div className="formgrid">
+              <label>
+                Worksheet
+                <select
+                  value={sheet}
+                  onChange={(e) => selectSheet(batch, e.target.value)}
+                >
+                  {batch.sheets.map((s: any) => (
+                    <option key={s.name}>{s.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                ردیف عنوان
+                <input
+                  type="number"
+                  min={1}
+                  max={30}
+                  value={header}
+                  onChange={(e) => setHeader(Number(e.target.value))}
+                />
+              </label>
+              <label>
+                حالت
+                <select value={mode} onChange={(e) => setMode(e.target.value)}>
+                  <option value="add_only">فقط افزودن</option>
+                  <option value="add_update">افزودن و به‌روزرسانی</option>
+                </select>
+              </label>
+            </div>
+            <details open>
+              <summary>بررسی / اصلاح نگاشت ستون‌ها</summary>
+              <div className="mappinggrid">
+                {batch.sheets
+                  .find((s: any) => s.name === sheet)
+                  ?.headers.map((h: string, i: number) => (
+                    <label key={i}>
+                      ستون {i + 1}: {h || "(خالی)"}
+                      <select
+                        value={mapping[String(i + 1)] || "ignore"}
+                        onChange={(e) =>
+                          setMapping({
+                            ...mapping,
+                            [String(i + 1)]: e.target.value,
+                          })
+                        }
+                      >
+                        {[
+                          "ignore",
+                          "row",
+                          "environment",
+                          "application",
+                          "vms",
+                          "cpu",
+                          "ram",
+                          "disk",
+                          "os",
+                          "network",
+                          "server_name",
+                          "ip",
+                          "subnet",
+                          "gateway",
+                          "username",
+                          "password",
+                          "status",
+                          "uuid",
+                          "disk_metadata",
+                        ].map((f) => (
+                          <option key={f} value={f}>
+                            {fields[f] ||
+                              (
+                                {
+                                  ignore: "نادیده گرفتن",
+                                  disk: "دیسک (GB)",
+                                  uuid: "UUID مخفی",
+                                  disk_metadata: "متادیتای دیسک",
+                                } as Record<string, string>
+                              )[f] ||
+                              f}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ))}
+              </div>
+            </details>
+            <button
+              onClick={() =>
+                run(async () => {
+                  const b = await api(`imports/${batch.id}/`, "POST", {
+                    action: "preview",
+                    worksheet: sheet,
+                    mapping,
+                    header_row: header,
+                    mode,
+                    version: batch.version,
+                  });
+                  setBatch({ ...batch, ...b });
+                  setRows(b.rows);
+                  setDecisions(
+                    Object.fromEntries(
+                      b.rows.map((r: any) => [
+                        r.row,
+                        {
+                          action: "skip",
+                          fields: "web",
+                          disks: "preserve",
+                          credential: "preserve",
+                          match: "",
+                        },
+                      ]),
+                    ),
+                  );
+                  await load();
+                })
+              }
+            >
+              اعتبارسنجی و پیش‌نمایش
+            </button>
+          </>
+        )}
+        {rows.length > 0 && (
+          <>
+            <h3>پیش‌نمایش و تصمیم‌ها</h3>
+            <p>
+              هر ردیف ابتدا «رد کردن» است. برای تغییر رکورد موجود، تطبیق و سیاست
+              فیلدها و دیسک‌ها را صریح انتخاب کنید.
+            </p>
+            {rows.map((r) => (
+              <article className="previewrow" key={r.row}>
+                <div className="sectionhead">
+                  <strong>
+                    ردیف {r.row} · {r.data.server_name} · {r.data.environment}
+                  </strong>
+                  <span className="badge">
+                    {r.current
+                      ? "به‌روزرسانی"
+                      : r.candidates.length
+                        ? "تطبیق لازم"
+                        : "افزودن"}
+                  </span>
+                </div>
+                {r.errors.length > 0 && (
+                  <div className="error">{r.errors.join(" · ")}</div>
+                )}
+                {r.warnings.length > 0 && (
+                  <div className="warning">{r.warnings.join(" · ")}</div>
+                )}
+                <details>
+                  <summary>داده Excel و نسخه فعلی</summary>
+                  <pre dir="ltr">
+                    {JSON.stringify(
+                      {
+                        excel: r.data,
+                        current: r.current,
+                        candidates: r.candidates,
+                      },
+                      null,
+                      2,
+                    )}
+                  </pre>
+                </details>
+                <div className="formgrid">
+                  <label>
+                    عمل
+                    <select
+                      value={decisions[r.row]?.action}
+                      onChange={(e) => patch(r, { action: e.target.value })}
+                    >
+                      <option value="skip">رد کردن</option>
+                      <option value="apply">اعمال Excel</option>
+                    </select>
+                  </label>
+                  {r.candidates.length > 0 && (
+                    <label>
+                      تطبیق صریح
+                      <select
+                        value={decisions[r.row]?.match}
+                        onChange={(e) => patch(r, { match: e.target.value })}
+                      >
+                        <option value="">انتخاب الزامی</option>
+                        <option value="new">ماشین جدید مستقل</option>
+                        {r.candidates.map((c: any) => (
+                          <option key={c.id} value={c.id}>
+                            {c.server_name} · {c.ip} · {c.id}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  <label>
+                    تصمیم فیلدها
+                    <select
+                      value={
+                        typeof decisions[r.row]?.fields === "object"
+                          ? "custom"
+                          : decisions[r.row]?.fields
+                      }
+                      onChange={(e) =>
+                        patch(r, {
+                          fields:
+                            e.target.value === "custom"
+                              ? Object.fromEntries(
+                                  Object.keys(r.data)
+                                    .filter((k) => k !== "disks")
+                                    .map((k) => [k, "web"]),
+                                )
+                              : e.target.value,
+                        })
+                      }
+                    >
+                      <option value="web">حفظ مقدار وب</option>
+                      <option value="excel">اعمال مقدار Excel</option>
+                      <option value="custom">تصمیم به تفکیک فیلد</option>
+                    </select>
+                  </label>
+                  <label>
+                    دیسک‌ها
+                    <select
+                      value={decisions[r.row]?.disks}
+                      onChange={(e) => patch(r, { disks: e.target.value })}
+                    >
+                      <option value="preserve">حفظ همه دیسک‌های وب</option>
+                      <option value="merge">
+                        اعمال ورودی و حفظ دیسک‌های اضافه
+                      </option>
+                      <option value="replace">
+                        جایگزینی کامل؛ حذف دیسک‌های غایب
+                      </option>
+                    </select>
+                  </label>
+                  {r.credential_present && (
+                    <label>
+                      اعتبارنامه
+                      <select
+                        value={decisions[r.row]?.credential}
+                        onChange={(e) =>
+                          patch(r, { credential: e.target.value })
+                        }
+                      >
+                        <option value="preserve">حفظ اعتبارنامه فعلی</option>
+                        <option
+                          value="apply"
+                          disabled={
+                            !project.permissions.includes("credential_edit")
+                          }
+                        >
+                          اعمال با مجوز مستقل
+                        </option>
+                      </select>
+                    </label>
+                  )}
+                </div>
+                {typeof decisions[r.row]?.fields === "object" && (
+                  <div className="mappinggrid">
+                    {Object.entries(decisions[r.row].fields).map(([k, v]) => (
+                      <label key={k}>
+                        {fields[k] || k}
+                        <select
+                          value={String(v)}
+                          onChange={(e) =>
+                            patch(r, {
+                              fields: {
+                                ...decisions[r.row].fields,
+                                [k]: e.target.value,
+                              },
+                            })
+                          }
+                        >
+                          <option value="web">حفظ وب</option>
+                          <option value="excel">اعمال Excel</option>
+                        </select>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </article>
+            ))}
+            <button
+              disabled={
+                batch?.issues?.length > 0 || batch?.status === "applied"
+              }
+              onClick={() =>
+                run(async () => {
+                  const result = await api(`imports/${batch.id}/`, "POST", {
+                    action: "apply",
+                    version: batch.version,
+                    decisions,
+                  });
+                  setBatch({ ...batch, status: "applied" });
+                  notice(
+                    `ورود کامل شد: ${result.added} افزوده، ${result.updated} تغییر، ${result.skipped} رد شده`,
+                  );
+                  await refresh();
+                  await load();
+                })
+              }
+            >
+              تأیید و اعمال تراکنشی
+            </button>
+          </>
+        )}
+      </section>
+      <section className="panel">
+        <h2>تاریخچه ورود</h2>
+        {history.map((b) => (
+          <article className="historyitem" key={b.id}>
+            <b>{b.filename}</b>
+            <span>
+              {b.status} · {time(b.created_at)} · {JSON.stringify(b.counts)}
+            </span>
+            {b.issues.length > 0 && <pre>{JSON.stringify(b.issues)}</pre>}
+            <button
+              className="ghost"
+              onClick={() =>
+                run(async () => {
+                  const data = await api(`imports/${b.id}/`);
+                  setBatch(data);
+                  selectSheet(data, data.sheets[0].name);
+                  setRows(data.rows);
+                  setDecisions(
+                    Object.fromEntries(
+                      data.rows.map((r: any) => [
+                        r.row,
+                        {
+                          action: "skip",
+                          fields: "web",
+                          disks: "preserve",
+                          credential: "preserve",
+                          match: "",
+                        },
+                      ]),
+                    ),
+                  );
+                })
+              }
+            >
+              باز کردن
+            </button>
+          </article>
+        ))}
+      </section>
+    </>
+  );
+}
+function Exports({
+  project,
+  run,
+  notice,
+}: {
+  project: Project;
+  run: Run;
+  notice: (s: string) => void;
+}) {
+  return (
+    <section className="panel">
+      <h2>خروجی از داده‌های فعلی پایگاه داده</h2>
+      <p>
+        مقادیر ویرایش‌شده در وب، ستون‌های مستقل دیسک و UUID مخفی در خروجی حفظ
+        می‌شوند. رمزها به‌صورت پیش‌فرض حذف شده‌اند.
+      </p>
+      <form
+        className="formgrid"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const d = Object.fromEntries(new FormData(e.currentTarget));
+          run(async () => {
+            await download(`projects/${project.id}/exports/`, {
+              ...d,
+              credentials: d.credentials === "on",
+              merged: d.merged === "on",
+              environment: d.environment || null,
+            });
+            notice("فایل خروجی دریافت شد");
+          });
+        }}
+      >
+        <label>
+          نوع
+          <select name="kind">
+            <option value="inventory">موجودی ماشین‌ها</option>
+            <option value="activity">فعالیت و تغییرات</option>
+          </select>
+        </label>
+        <label>
+          محیط
+          <select name="environment">
+            <option value="">کل پروژه</option>
+            {project.environments.map((e) => (
+              <option key={e.id} value={e.id}>
+                {e.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="check">
+          <input type="checkbox" name="merged" defaultChecked />
+          ادغام سلول‌های محیط و Application
+        </label>
+        <label className="check">
+          <input
+            type="checkbox"
+            name="credentials"
+            disabled={!project.permissions.includes("credential_export")}
+          />
+          خروجی رمز با مجوز مستقل (فایل حساس)
+        </label>
+        <button>دریافت XLSX</button>
+      </form>
+      <p className="warning">
+        فایل رمزدار پس از دانلود تحت کنترل دریافت‌کننده است. فایل خروجی روی سرور
+        ذخیره نمی‌شود و هر درخواست دوباره مجوزسنجی می‌شود.
+      </p>
+    </section>
+  );
+}
+function PermissionChecks({
+  selected,
+  toggle,
+  global = false,
+}: {
+  selected: string[];
+  toggle: (p: string) => void;
+  global?: boolean;
+}) {
+  return (
+    <div className="permissiongrid">
+      {Object.entries(permLabels)
+        .filter(
+          ([k]) =>
+            global ||
+            ![
+              "manage_users",
+              "auth_settings",
+              "audit_view",
+              "perform_updates",
+            ].includes(k),
+        )
+        .map(([k, l]) => (
+          <label className="check" key={k}>
+            <input
+              type="checkbox"
+              checked={selected.includes(k)}
+              onChange={() => toggle(k)}
+            />
+            {l}
+          </label>
+        ))}
+    </div>
+  );
+}
+function Access({
+  project,
+  run,
+  epoch,
+  refresh,
+}: {
+  project?: Project;
+  run: Run;
+  epoch: number;
+  refresh: () => Promise<void>;
+}) {
+  const [users, setUsers] = useState<User[]>([]),
+    [members, setMembers] = useState<any[]>([]),
+    [edit, setEdit] = useState<User | null>(null),
+    [perms, setPerms] = useState<string[]>([]),
+    [memberUser, setMemberUser] = useState(""),
+    [memberRole, setMemberRole] = useState("viewer"),
+    [memberPerms, setMemberPerms] = useState<string[]>([]);
+  const load = async () => {
+    setUsers(await api("users/"));
+    if (project) setMembers(await api(`projects/${project.id}/memberships/`));
+  };
+  useEffect(() => {
+    run(load);
+  }, [project?.id, epoch]);
+  return (
+    <>
+      <section className="panel">
+        <h2>{edit ? "ویرایش حساب" : "حساب محلی جدید"}</h2>
+        <form
+          key={edit?.id || "new"}
+          className="formgrid"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const d = Object.fromEntries(new FormData(e.currentTarget));
+            run(async () => {
+              await api("users/", edit ? "PATCH" : "POST", {
+                ...d,
+                id: edit?.id,
+                is_active: d.is_active === "on",
+                is_admin: d.is_admin === "on",
+                permissions: perms,
+              });
+              setEdit(null);
+              setPerms([]);
+              await load();
+              await refresh();
+            });
+          }}
+        >
+          <label>
+            نام کاربری
+            <input
+              name="username"
+              dir="ltr"
+              defaultValue={edit?.username}
+              disabled={!!edit}
+              required
+            />
+          </label>
+          <label>
+            نام نمایشی
+            <input name="first_name" defaultValue={edit?.first_name} />
+          </label>
+          {!edit && (
+            <label>
+              رمز حساب
+              <input
+                type="password"
+                name="password"
+                minLength={12}
+                required
+                autoComplete="new-password"
+              />
+            </label>
+          )}
+          <label className="check">
+            <input
+              type="checkbox"
+              name="is_active"
+              defaultChecked={edit ? edit.is_active : true}
+            />
+            فعال
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              name="is_admin"
+              defaultChecked={edit?.is_admin}
+            />
+            مدیر سیستم
+          </label>
+          <div className="wide">
+            <h3>مجوزهای مستقل</h3>
+            <PermissionChecks
+              global
+              selected={perms}
+              toggle={(p) =>
+                setPerms(
+                  perms.includes(p)
+                    ? perms.filter((x) => x !== p)
+                    : [...perms, p],
+                )
+              }
+            />
+          </div>
+          <div className="actions">
+            <button>ذخیره حساب</button>
+            {edit && (
+              <button
+                className="ghost"
+                type="button"
+                onClick={() => {
+                  setEdit(null);
+                  setPerms([]);
+                }}
+              >
+                لغو
+              </button>
+            )}
+          </div>
+        </form>
+        <div className="userlist">
+          {users.map((u) => (
+            <button
+              className="ghost"
+              key={u.id}
+              onClick={() => {
+                setEdit(u);
+                setPerms(u.permissions);
+              }}
+            >
+              {u.username} ·{" "}
+              {u.is_admin ? "مدیر" : u.is_active ? "فعال" : "غیرفعال"}
+            </button>
+          ))}
+        </div>
+      </section>
+      {project && (
+        <section className="panel">
+          <h2>عضویت در {project.name}</h2>
+          <form
+            className="formgrid"
+            onSubmit={(e) => {
+              e.preventDefault();
+              run(async () => {
+                await api(`projects/${project.id}/memberships/`, "POST", {
+                  user: Number(memberUser),
+                  role: memberRole,
+                  permissions: memberPerms,
+                });
+                await load();
+                await refresh();
+              });
+            }}
+          >
+            <label>
+              کاربر
+              <select
+                required
+                value={memberUser}
+                onChange={(e) => {
+                  setMemberUser(e.target.value);
+                  const m = members.find(
+                    (x) => x.user_id === Number(e.target.value),
+                  );
+                  setMemberRole(m?.role || "viewer");
+                  setMemberPerms(m?.permissions || []);
+                }}
+              >
+                <option value="">انتخاب</option>
+                {users.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.username}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              نقش
+              <select
+                value={memberRole}
+                onChange={(e) => setMemberRole(e.target.value)}
+              >
+                {Object.entries(roles).map(([k, l]) => (
+                  <option key={k} value={k}>
+                    {l}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="wide">
+              <PermissionChecks
+                selected={memberPerms}
+                toggle={(p) =>
+                  setMemberPerms(
+                    memberPerms.includes(p)
+                      ? memberPerms.filter((x) => x !== p)
+                      : [...memberPerms, p],
+                  )
+                }
+              />
+            </div>
+            <button>ذخیره عضویت</button>
+          </form>
+          {members.map((m) => (
+            <div className="historyitem" key={m.id}>
+              <span>
+                {m.user__username} · {roles[m.role]} ·{" "}
+                {m.permissions.map((p: string) => permLabels[p]).join("، ")}
+              </span>
+              <button
+                className="danger"
+                onClick={() =>
+                  run(async () => {
+                    await api(`projects/${project.id}/memberships/`, "POST", {
+                      user: m.user_id,
+                      role: m.role,
+                      permissions: [],
+                      remove: true,
+                    });
+                    await load();
+                    await refresh();
+                  })
+                }
+              >
+                حذف عضویت
+              </button>
+            </div>
+          ))}
+        </section>
+      )}
+    </>
+  );
+}
+function AuditPage({ run }: { run: Run }) {
+  const [events, setEvents] = useState<any[]>([]);
+  useEffect(() => {
+    run(async () => setEvents(await api("audit/")));
+  }, []);
+  return (
+    <section className="panel">
+      <h2>رویدادهای غیرقابل ویرایش سیستم</h2>
+      <div className="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th>زمان</th>
+              <th>کاربر</th>
+              <th>عمل</th>
+              <th>هدف</th>
+              <th>جزئیات بدون رمز</th>
+            </tr>
+          </thead>
+          <tbody>
+            {events.map((a) => (
+              <tr key={a.id}>
+                <td>{time(a.created_at)}</td>
+                <td>{a.user__username}</td>
+                <td>{a.event}</td>
+                <td dir="ltr">{a.target}</td>
+                <td>{JSON.stringify(a.metadata)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+function Settings({
+  user,
+  run,
+  notice,
+}: {
+  user: User;
+  run: Run;
+  notice: (s: string) => void;
+}) {
+  const [updates, setUpdates] = useState<any>(null),
+    [auth, setAuth] = useState<any>(null);
+  const canUpdate =
+      user.is_admin || user.permissions.includes("perform_updates"),
+    canAuth = user.is_admin || user.permissions.includes("auth_settings");
+  const load = async () => {
+    if (canUpdate) setUpdates(await api("updates/"));
+    if (canAuth) setAuth(await api("settings/"));
+  };
+  useEffect(() => {
+    run(load);
+    const timer = setInterval(() => {
+      if (canUpdate)
+        api("updates/")
+          .then(setUpdates)
+          .catch(() => {});
+    }, 5000);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <>
+      <section className="panel">
+        <h2>تغییر رمز حساب خود</h2>
+        <form
+          className="formgrid"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const f = e.currentTarget;
+            run(async () => {
+              await api(
+                "password/",
+                "POST",
+                Object.fromEntries(new FormData(f)),
+              );
+              f.reset();
+              notice("رمز حساب تغییر کرد");
+            });
+          }}
+        >
+          <label>
+            رمز فعلی
+            <input
+              name="old_password"
+              type="password"
+              autoComplete="current-password"
+              required
+            />
+          </label>
+          <label>
+            رمز جدید
+            <input
+              name="new_password"
+              type="password"
+              autoComplete="new-password"
+              minLength={12}
+              required
+            />
+          </label>
+          <button>تغییر رمز</button>
+        </form>
+      </section>
+      {auth && (
+        <section className="panel">
+          <h2>سیاست جلسه</h2>
+          <form
+            className="inlineform"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const v = new FormData(e.currentTarget).get("session_seconds");
+              run(async () => {
+                await api("settings/", "PATCH", { session_seconds: Number(v) });
+                notice("سیاست برای ورودهای بعدی ذخیره شد");
+              });
+            }}
+          >
+            <label>
+              زمان جلسه (ثانیه)
+              <input
+                type="number"
+                name="session_seconds"
+                min={300}
+                max={86400}
+                defaultValue={auth.session_seconds}
+              />
+            </label>
+            <button>ذخیره</button>
+          </form>
+          <p>
+            OIDC: پیکربندی نشده · MFA: قابلیت آینده؛ در این نسخه اعمال نمی‌شود.
+          </p>
+        </section>
+      )}
+      {updates && (
+        <section className="panel">
+          <div className="sectionhead">
+            <h2>مرکز به‌روزرسانی</h2>
+            <span className="badge" dir="ltr">
+              v{updates.installed}
+            </span>
+          </div>
+          <p>
+            فقط انتشار تأییدشده و امضاشده؛ اجرا توسط سرویس مستقل محدود، خارج از
+            درخواست وب.
+          </p>
+          <button
+            onClick={() =>
+              run(async () => {
+                await api("updates/", "POST", { action: "check" });
+                await load();
+                notice("بررسی انتشار تکمیل شد");
+              })
+            }
+          >
+            بررسی به‌روزرسانی
+          </button>
+          {updates.available && (
+            <article className="previewrow">
+              <h3 dir="ltr">{updates.available.version}</h3>
+              <p>{updates.available.notes}</p>
+              <pre>
+                {JSON.stringify(updates.available.compatibility, null, 2)}
+              </pre>
+              <small>آخرین بررسی: {time(updates.available.checked_at)}</small>
+              <div className="actions">
+                <button
+                  disabled={!updates.execution_enabled}
+                  onClick={() =>
+                    run(async () => {
+                      await api("updates/", "POST", {
+                        action: "install",
+                        version: updates.available.version,
+                      });
+                      await load();
+                    })
+                  }
+                >
+                  نصب انتشار انتخاب‌شده
+                </button>
+              </div>
+            </article>
+          )}
+          {!updates.execution_enabled && (
+            <div className="warning">
+              اجرای به‌روزرسانی فعال نیست. اتصال سرویس مستقل، مخزن و کلید عمومی
+              امضا باید در فاز استقرار انجام شود.
+            </div>
+          )}
+          <h3>اجراهای ثبت‌شده</h3>
+          {updates.runs.map((r: any) => (
+            <article className="historyitem" key={r.id}>
+              <b>
+                {r.from_version} ← {r.to_version} · {r.status}
+              </b>
+              <span>{time(r.updated_at)}</span>
+              <p>پشتیبان: {r.backup_path || "هنوز ایجاد نشده"}</p>
+              <ol>
+                {r.progress.map((s: string, i: number) => (
+                  <li key={i}>{s}</li>
+                ))}
+              </ol>
+              {r.error && <p className="error">{r.error}</p>}
+              {r.status === "failed" && (
+                <button
+                  disabled={!updates.execution_enabled}
+                  onClick={() =>
+                    run(async () => {
+                      await api("updates/", "POST", {
+                        action: "retry",
+                        version: r.to_version,
+                      });
+                      await load();
+                    })
+                  }
+                >
+                  تلاش دوباره
+                </button>
+              )}
+            </article>
+          ))}
+          <h3>به‌روزرسانی آفلاین / دستی</h3>
+          <p>
+            بسته و manifest امضاشده را آماده کنید؛ از scripts/upgrade.py طبق
+            docs/operations.fa.md استفاده کنید. بازیابی پایگاه داده برای تغییرات
+            غیرقابل برگشت دستی است.
+          </p>
+        </section>
+      )}
+    </>
+  );
+}
+createRoot(document.getElementById("root")!).render(<App />);

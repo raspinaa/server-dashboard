@@ -1,0 +1,84 @@
+name: infrahub
+services:
+  db:
+    image: mysql:8.4.11
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?required}
+      MYSQL_TARGET_HOST: ${MYSQL_HOST:-db}
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?required}
+      MYSQL_USER: ${MYSQL_USER:?required}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?required}
+    command: ["--defaults-extra-file=/etc/mysql/conf.d/infrahub.cnf"]
+    volumes:
+      - ../data/mysql:/var/lib/mysql
+      - ./mysql.cnf:/etc/mysql/conf.d/infrahub.cnf:ro
+    healthcheck:
+      test: ["CMD-SHELL", 'MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysql -uroot -e "SELECT 1" >/dev/null']
+      interval: 5s
+      timeout: 5s
+      retries: 60
+    networks: [internal]
+  backend:
+    image: infrahub-backend:${APP_VERSION:-0.1.0}
+    build: {context: .., dockerfile: backend/Dockerfile}
+    restart: unless-stopped
+    environment:
+      DEBUG: "0"
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?required}
+      CREDENTIAL_KEY: ${CREDENTIAL_KEY:?required}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:?required}
+      CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:?required}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?required}
+      MYSQL_USER: ${MYSQL_USER:?required}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?required}
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
+      MYSQL_HOST: ${MYSQL_HOST:-db}
+      UPLOAD_LIMIT_MB: ${UPLOAD_LIMIT_MB:-10}
+      SESSION_SECONDS: ${SESSION_SECONDS:-3600}
+      RELEASE_REPOSITORY: ${RELEASE_REPOSITORY:-}
+      RELEASE_CHANNEL: ${RELEASE_CHANNEL:-stable}
+      RELEASE_PUBLIC_KEY: ${RELEASE_PUBLIC_KEY:-}
+      RELEASE_TOKEN_FILE: ${RELEASE_TOKEN_FILE:-}
+      UPDATE_EXECUTION_ENABLED: ${UPDATE_EXECUTION_ENABLED:-0}
+      MEDIA_ROOT: /app/uploads
+      UPDATE_STATE: /app/state
+    volumes:
+      - ../data/uploads:/app/uploads
+      - ../state:/app/state:ro
+      - ../secrets:/run/secrets:ro
+    depends_on:
+      db: {condition: service_healthy}
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [internal, egress]
+  frontend:
+    image: infrahub-frontend:${APP_VERSION:-0.1.0}
+    build: {context: .., dockerfile: frontend/Dockerfile}
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp, /var/cache/nginx, /var/run]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [internal]
+  proxy:
+    image: caddy:2-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
+    restart: unless-stopped
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?required}
+      HTTPS_PORT: ${HTTPS_PORT:?required}
+      UPLOAD_LIMIT_MB: ${UPLOAD_LIMIT_MB:-10}
+    ports: ["${HTTP_PORT:?HTTP_PORT required}:80", "${HTTPS_PORT:?HTTPS_PORT required}:443"]
+    volumes:
+      - ${CADDY_CONFIG:-./Caddyfile}:/etc/caddy/Caddyfile:ro
+      - ../data/tls:/etc/caddy/tls:ro
+      - ../data/caddy:/data
+      - ../data/caddy-config:/config
+    depends_on: [backend,frontend]
+    networks: [internal, egress]
+networks:
+  internal: {internal: true}
+  egress: {}

@@ -1,0 +1,16 @@
+[Unit]
+Description=InfraHub constrained update helper (opt-in)
+After=docker.service
+Requires=docker.service
+[Service]
+Type=simple
+Environment=INFRAHUB_ROOT=/opt/infrahub
+WorkingDirectory=/opt/infrahub
+ExecStart=/opt/infrahub/helper-venv/bin/python /opt/infrahub/scripts/update_helper.py
+Restart=on-failure
+RestartSec=10
+UMask=0077
+# Host-side helper needs Docker access; ordinary web containers never receive it.
+# Install only after reviewing trusted signed releases and this service's privilege boundary.
+[Install]
+WantedBy=multi-user.target

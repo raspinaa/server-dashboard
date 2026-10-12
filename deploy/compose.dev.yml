@@ -1,0 +1,20 @@
+name: infrahub-dev
+services:
+  db:
+    image: mysql:8.4.11
+    environment:
+      MYSQL_ROOT_PASSWORD: local-test-root-only
+      MYSQL_DATABASE: infrahub
+      MYSQL_USER: infrahub
+      MYSQL_PASSWORD: local-test-only
+    ports: ["127.0.0.1:3306:3306"]
+    volumes:
+      - dev_mysql:/var/lib/mysql
+      - ./mysql.cnf:/etc/mysql/conf.d/infrahub.cnf:ro
+    healthcheck:
+      test: ["CMD-SHELL", 'MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysql -uroot -e "SELECT 1" >/dev/null']
+      interval: 3s
+      timeout: 3s
+      retries: 60
+volumes:
+  dev_mysql:
