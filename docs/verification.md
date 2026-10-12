@@ -82,11 +82,3 @@ Reproduce safe checks: `python -m pytest -q`, `bash -n scripts/bootstrap-debian.
 ## Installer permissions follow-up — 2026-10-12
 
 95 MySQL-backed tests passed with opt-in isolated backup/restore. Permission tests cover private modes, intended ownership calls, repeatability, preserved key/database contents, and rejecting symbolic/hard links before mutations. Ownership operations are mocked in safe temporary-directory tests; no host permission changes or production installer execution occurred. Gunicorn configuration accepted umask 0077 (decimal 63). Fresh-server installation and actual cross-container UID access remain deployment-phase checks.
-
-## Public demo source — 2026-10-12
-
-Desktop and 390px mobile browser flows passed with Chromium: inventory detail, resource editing/recalculation, escaped comment rendering, environment selection, example import decisions and JSON download. No API requests or page script errors occurred. Desktop/mobile screenshots were inspected. Demo JavaScript syntax and Git whitespace checks passed. GitHub API and github.io are denied by this environment's network proxy; publication status cannot be verified from this environment. The Pages workflow publishes only `demo/`; activation may require repository administrator settings.
-
-## Pages configuration correction — 2026-10-12
-
-Official actions/configure-pages v5 action.yml explicitly requires a token other than GITHUB_TOKEN for `enablement: true`. Removed this unsupported automatic-enable combination and added actionable workflow diagnostics. Initial Pages enablement must be completed by the repository administrator in Settings → Pages → Source: GitHub Actions. The user supplied the failed configure-pages log: Get Pages site: Not Found, followed by Create Pages site: Resource not accessible by integration. This confirms missing initial enablement and insufficient administrative permission in GITHUB_TOKEN. Subsequent deployment status remains unverified because GitHub API access is denied in this environment.

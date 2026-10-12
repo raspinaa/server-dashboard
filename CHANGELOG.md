@@ -2,9 +2,9 @@
 
 ## 0.1.0 — Unreleased
 
-- Fix Pages workflow: initial enablement requires repository administrator settings, while the standard workflow token publishes an already-enabled site.
+- Remove public demo, its publication workflow and documentation links.
 
-- Standalone Persian RTL demo with synthetic inventory, interactive resource summaries and session-only edits; dedicated GitHub Pages publication workflow.
+
 
 - Explicit, repeatable private-file ownership/modes in both installers; reject unsafe links and preserve database ownership.
 - Readable application state, root-only backup/staging storage and private Gunicorn file creation.
