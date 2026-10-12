@@ -26,6 +26,7 @@ services:
     restart: unless-stopped
     environment:
       DEBUG: "0"
+      TLS_MODE: ${TLS_MODE:-letsencrypt}
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?required}
       CREDENTIAL_KEY: ${CREDENTIAL_KEY:?required}
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:?required}
@@ -69,6 +70,7 @@ services:
     restart: unless-stopped
     environment:
       SITE_ADDRESS: ${SITE_ADDRESS:?required}
+      ACME_EMAIL: ${ACME_EMAIL:-}
       HTTPS_PORT: ${HTTPS_PORT:?required}
       UPLOAD_LIMIT_MB: ${UPLOAD_LIMIT_MB:-10}
     ports: ["${HTTP_PORT:?HTTP_PORT required}:80", "${HTTPS_PORT:?HTTPS_PORT required}:443"]

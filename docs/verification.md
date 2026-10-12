@@ -70,3 +70,11 @@ npm run test:e2e
 - **OIDC/MFA/secret-store adapter:** مرز integration و وضعیت «پیکربندی نشده/آینده» مستند است؛ قابلیت اجرایی یا امنیت اعمال‌شده ادعا نمی‌شود.
 
 این تست‌ها جایگزین بازبینی امنیتی مستقل و acceptance/restore drill روی محیط هدف نیستند. سقف import محدود و synchronous است؛ workloadهای بالاتر از ۱۰٬۰۰۰ ردیف به worker جداگانه آینده نیاز دارند. هیچ formatting fidelity کامل از screenshot یا همه اشیای سفارشی workbook ادعا نمی‌شود.
+
+## Debian bootstrap source update — 2026-10-12
+
+Result: **91 tests passed**, including opt-in disposable-MySQL backup/restore. Local checks for this change: MySQL-backed backend/operations suite, isolated dump/restore, transport/configuration tests, shell syntax, Python compilation and `git diff --check`. Three Caddy configurations (ACME, internal CA, HTTP) passed validation in network-isolated containers. Local-DNS image built for amd64 with verified apt packages and its generated dnsmasq configuration passed syntax validation. Site/DNS Compose override rendered successfully with `docker compose config --quiet`.
+
+This change does not modify frontend source; the prior frontend type/build/browser results apply to the unchanged UI. Fresh Debian 12/13 installation, host apt/service changes, live DNS queries from clients, public DNS provisioning, real ACME issuance/renewal, client CA installation and reboot persistence were **not executed**. They require the later deployment phase, using `docs/debian-install.fa.md`. Initial pinned-source bootstrap is distinct from the existing Ubuntu-specific signed-release updater; Debian signed-release compatibility needs configuration/source integration before dashboard updates are enabled.
+
+Reproduce safe checks: `python -m pytest -q`, `bash -n scripts/bootstrap-debian.sh`. For disposable MySQL dump/restore testing only: `MYSQL_SCRIPT_CONTAINER=YOUR_DISPOSABLE_MYSQL_CONTAINER python -m pytest tests/test_backup_integration.py -q`. Do not point integration tests at production data.

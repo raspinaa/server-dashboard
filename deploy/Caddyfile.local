@@ -1,0 +1,24 @@
+{
+ auto_https disable_redirects
+ skip_install_trust
+}
+http://{$SITE_ADDRESS} {
+ redir https://{$SITE_ADDRESS}:{$HTTPS_PORT}{uri} permanent
+}
+{$SITE_ADDRESS} {
+ tls internal
+ request_body {
+  max_size {$UPLOAD_LIMIT_MB}MB
+ }
+ handle /api/* {
+  reverse_proxy backend:8000
+ }
+ handle {
+  reverse_proxy frontend:8080
+ }
+ header {
+  Strict-Transport-Security "max-age=31536000; includeSubDomains"
+  X-Content-Type-Options "nosniff"
+  Referrer-Policy "same-origin"
+ }
+}

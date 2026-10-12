@@ -8,14 +8,9 @@ import json, os, re, time, urllib.request, fcntl, subprocess
 from pathlib import Path
 
 ROOT = Path(os.environ.get("INFRAHUB_ROOT", "/opt/infrahub")).resolve()
-DC = [
-    "docker",
-    "compose",
-    "--env-file",
-    str(ROOT / ".env"),
-    "-f",
-    str(ROOT / "deploy/compose.prod.yml"),
-]
+from deployment import compose_command
+
+DC = compose_command(ROOT)
 
 
 def command(action, payload=None):

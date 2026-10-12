@@ -28,3 +28,6 @@ secrets/
 .npm/
 *.sql
 *.partial
+
+# Operator-generated site configuration lives outside replaceable source.
+/config/

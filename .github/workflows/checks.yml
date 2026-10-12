@@ -29,6 +29,7 @@ jobs:
       - run: python -m pip install --require-hashes -r backend/requirements.lock
       - run: echo "CREDENTIAL_KEY=$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')" >> "$GITHUB_ENV"
       - run: python backend/manage.py check && python backend/manage.py makemigrations --check --dry-run
+      - run: for script in scripts/*.sh; do bash -n "$script"; done
       - run: python -m pytest -q
       - run: python backend/manage.py migrate --noinput && python backend/manage.py seed_dev
       - uses: actions/setup-node@v4

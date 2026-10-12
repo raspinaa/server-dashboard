@@ -2,6 +2,10 @@
 
 ## 0.1.0 — Unreleased
 
+- Product-first Persian introduction and staged Debian 12/13 amd64 bootstrap source.
+- Pinned source download, explicit ACME/local/HTTP transport, optional isolated local DNS.
+- Durable site overrides, idempotent administrator setup and CA/config preservation in backups.
+
 - Persian RTL project/environment inventory with independent disk records and stable UUIDs.
 - Local session authentication, scoped memberships, independent credential/export/update permissions.
 - Optimistic edits, activity/comments with revisions, field-level and disk history.

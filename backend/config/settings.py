@@ -68,15 +68,21 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_ROOT = Path(os.getenv("MEDIA_ROOT", str(BASE_DIR / "media")))
 DATA_UPLOAD_MAX_MEMORY_SIZE = int(os.getenv("UPLOAD_LIMIT_MB", "10")) * 1024 * 1024
 FILE_UPLOAD_MAX_MEMORY_SIZE = DATA_UPLOAD_MAX_MEMORY_SIZE
+# Transport mode is explicit. Production defaults to TLS; "none" is an operator
+# choice for trusted HTTP networks, never an automatic certificate fallback.
+TLS_MODE = os.getenv("TLS_MODE", "letsencrypt")
+if TLS_MODE not in {"letsencrypt", "local", "none", "custom"}:
+    raise ImproperlyConfigured("Invalid TLS_MODE")
+TRANSPORT_SECURE = not DEBUG and TLS_MODE != "none"
 SESSION_COOKIE_HTTPONLY = True
-SESSION_COOKIE_SECURE = not DEBUG
-CSRF_COOKIE_SECURE = not DEBUG
+SESSION_COOKIE_SECURE = TRANSPORT_SECURE
+CSRF_COOKIE_SECURE = TRANSPORT_SECURE
 SESSION_COOKIE_SAMESITE = "Lax"
 SESSION_COOKIE_AGE = int(os.getenv("SESSION_SECONDS", "3600"))
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
-SECURE_HSTS_SECONDS = 31536000 if not DEBUG else 0
-SECURE_HSTS_INCLUDE_SUBDOMAINS = not DEBUG
+SECURE_HSTS_SECONDS = 31536000 if TRANSPORT_SECURE else 0
+SECURE_HSTS_INCLUDE_SUBDOMAINS = TRANSPORT_SECURE
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
@@ -111,5 +117,5 @@ if not DEBUG:
             "A valid separately managed CREDENTIAL_KEY is required"
         )
 
-SECURE_SSL_REDIRECT = not DEBUG
+SECURE_SSL_REDIRECT = TRANSPORT_SECURE
 SECURE_REDIRECT_EXEMPT = [r"^api/health/$"]

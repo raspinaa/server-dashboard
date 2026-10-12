@@ -9,9 +9,13 @@ class Command(BaseCommand):
 
     def add_arguments(self, p):
         p.add_argument("--username", required=True)
+        p.add_argument("--if-missing", action="store_true", help="Preserve an existing active administrator during installation resume")
 
     def handle(self, *args, **options):
         if User.objects.filter(is_superuser=True, is_active=True).exists():
+            if options["if_missing"]:
+                self.stdout.write("Existing administrator preserved")
+                return
             raise CommandError(
                 "An active administrator already exists; use changepassword for recovery"
             )

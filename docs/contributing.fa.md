@@ -27,3 +27,17 @@ CI در .github/workflows/checks.yml فقط تست و build انجام می‌د
 هر batch منطقی یک commit قابل بازبینی داشته باشد و پیام آن مشکل/رفتار نهایی را توضیح دهد. commit سورس با release فرق دارد. نسخه از VERSION خوانده می‌شود؛ هنگام تغییر نسخه package.json و lock metadata نیز هماهنگ و CHANGELOG به‌روز شود. tag/release و artifact signing فقط در مرحله انتشار مجاز، با release-notes template و migration/backup guidance انجام می‌شوند. کلید خصوصی امضا در مخزن یا host وب نباشد.
 
 برای نصب، عملیات و integrationهای هنوز تأییدنشده به operations.fa.md و verification.md مراجعه کنید. در این مرحله OIDC/MFA و secret-store adapter قابلیت آینده‌اند؛ toggle یا claim اجرایی برای آن‌ها اضافه نکنید مگر پیاده‌سازی و آزمون شوند.
+
+## فرمان‌های بررسی محلی
+
+```bash
+.venv/bin/python scripts/dev.py check
+MYSQL_USER=root MYSQL_PASSWORD=local-test-root-only MYSQL_PORT=3306 .venv/bin/python scripts/dev.py test
+cd frontend
+npm run typecheck
+npm test
+npm run build
+npm run test:e2e
+```
+
+نتایج اجرا و محدودیت‌ها در [گزارش بررسی‌ها](verification.md) نگهداری می‌شوند.

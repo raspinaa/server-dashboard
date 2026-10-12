@@ -7,6 +7,7 @@ Irreversible database failures require an operator-reviewed restore.
 import argparse, fcntl, json, os, shutil, subprocess, time
 from pathlib import Path
 from release import verify, extract
+from deployment import compose_command
 
 
 def run(args, cwd):
@@ -55,14 +56,7 @@ def upgrade(
             2 * 1024**3, Path(artifact).stat().st_size * 5
         ):
             raise ValueError("At least 2 GiB free required")
-        dc = [
-            "docker",
-            "compose",
-            "--env-file",
-            str(root / ".env"),
-            "-f",
-            str(root / "deploy/compose.prod.yml"),
-        ]
+        dc = compose_command(root)
         if not resume:
             run(["bash", str(root / "scripts/health.sh"), str(root)], root)
             step("preflight_passed")
