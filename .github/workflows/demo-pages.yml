@@ -19,9 +19,16 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v5
-        with:
-          enablement: true
+      # Initial Pages enablement is an administrator setting. GITHUB_TOKEN
+      # can publish an enabled site but cannot enable Pages for a repository.
+      - name: Configure existing Pages site
+        id: pages
+        uses: actions/configure-pages@v5
+      - name: Explain missing Pages configuration
+        if: failure() && steps.pages.outcome == 'failure'
+        run: |
+          echo '::error::Enable Pages first: Settings > Pages > Build and deployment > Source > GitHub Actions. Then rerun this workflow. Private repositories require a plan supporting Pages.'
+          echo 'Pages must be enabled by the repository administrator in Settings > Pages, with Source set to GitHub Actions. No administrative token is stored in this workflow.' >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-pages-artifact@v3
         with:
           path: demo
