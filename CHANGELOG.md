@@ -2,6 +2,9 @@
 
 ## 0.1.0 — Unreleased
 
+- Explicit, repeatable private-file ownership/modes in both installers; reject unsafe links and preserve database ownership.
+- Readable application state, root-only backup/staging storage and private Gunicorn file creation.
+
 - Product-first Persian introduction and staged Debian 12/13 amd64 bootstrap source.
 - Pinned source download, explicit ACME/local/HTTP transport, optional isolated local DNS.
 - Durable site overrides, idempotent administrator setup and CA/config preservation in backups.

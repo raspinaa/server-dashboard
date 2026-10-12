@@ -223,6 +223,7 @@ def main():
         "-f",
         str(root / "deploy/compose.prod.yml"),
     ]
+    command([sys.executable, str(root / "scripts/harden_permissions.py"), str(root)])
     if a.offline:
         images = root / "deploy/offline/images.tar"
         if not images.is_file():

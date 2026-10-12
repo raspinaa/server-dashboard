@@ -78,3 +78,7 @@ Result: **91 tests passed**, including opt-in disposable-MySQL backup/restore. L
 This change does not modify frontend source; the prior frontend type/build/browser results apply to the unchanged UI. Fresh Debian 12/13 installation, host apt/service changes, live DNS queries from clients, public DNS provisioning, real ACME issuance/renewal, client CA installation and reboot persistence were **not executed**. They require the later deployment phase, using `docs/debian-install.fa.md`. Initial pinned-source bootstrap is distinct from the existing Ubuntu-specific signed-release updater; Debian signed-release compatibility needs configuration/source integration before dashboard updates are enabled.
 
 Reproduce safe checks: `python -m pytest -q`, `bash -n scripts/bootstrap-debian.sh`. For disposable MySQL dump/restore testing only: `MYSQL_SCRIPT_CONTAINER=YOUR_DISPOSABLE_MYSQL_CONTAINER python -m pytest tests/test_backup_integration.py -q`. Do not point integration tests at production data.
+
+## Installer permissions follow-up — 2026-10-12
+
+95 MySQL-backed tests passed with opt-in isolated backup/restore. Permission tests cover private modes, intended ownership calls, repeatability, preserved key/database contents, and rejecting symbolic/hard links before mutations. Ownership operations are mocked in safe temporary-directory tests; no host permission changes or production installer execution occurred. Gunicorn configuration accepted umask 0077 (decimal 63). Fresh-server installation and actual cross-container UID access remain deployment-phase checks.

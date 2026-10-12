@@ -140,7 +140,7 @@ for m in t:
   python3 "$root/scripts/configure_site.py" --root "$root" --host "$host" --tls "$tls" --email "$email" --dns "$dns" --address "$address" --bind "$bind" --http "$http" --https "$https"
  fi
  cd "$root"
- chown 10001:10001 "$root/data/uploads"
+ python3 scripts/harden_permissions.py "$root"
  bash scripts/compose.sh "$root" config --quiet
  python3 - <<'PY'
 import json, socket
