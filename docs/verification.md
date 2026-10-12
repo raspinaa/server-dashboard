@@ -82,3 +82,7 @@ Reproduce safe checks: `python -m pytest -q`, `bash -n scripts/bootstrap-debian.
 ## Installer permissions follow-up — 2026-10-12
 
 95 MySQL-backed tests passed with opt-in isolated backup/restore. Permission tests cover private modes, intended ownership calls, repeatability, preserved key/database contents, and rejecting symbolic/hard links before mutations. Ownership operations are mocked in safe temporary-directory tests; no host permission changes or production installer execution occurred. Gunicorn configuration accepted umask 0077 (decimal 63). Fresh-server installation and actual cross-container UID access remain deployment-phase checks.
+
+## Public demo source — 2026-10-12
+
+Desktop and 390px mobile browser flows passed with Chromium: inventory detail, resource editing/recalculation, escaped comment rendering, environment selection, example import decisions and JSON download. No API requests or page script errors occurred. Desktop/mobile screenshots were inspected. Demo JavaScript syntax and Git whitespace checks passed. GitHub API and github.io are denied by this environment's network proxy; publication status cannot be verified from this environment. The Pages workflow publishes only `demo/`; activation may require repository administrator settings.
