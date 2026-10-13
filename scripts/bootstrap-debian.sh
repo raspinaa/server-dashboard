@@ -153,8 +153,8 @@ if site['tls']=='letsencrypt':
 PY
  bash scripts/compose.sh "$root" build
  bash scripts/compose.sh "$root" up -d db
- bash scripts/compose.sh "$root" run --rm backend python manage.py migrate --noinput
- bash scripts/compose.sh "$root" run --rm -it backend python manage.py bootstrap_admin --username "$admin" --if-missing
+ bash scripts/compose.sh "$root" run --rm backend python backend/manage.py migrate --noinput
+ bash scripts/compose.sh "$root" run --rm -it backend python backend/manage.py bootstrap_admin --username "$admin" --if-missing
  bash scripts/compose.sh "$root" up -d
  python3 scripts/install_cli.py --root "$root"
  python3 scripts/site_health.py "$root"
