@@ -13,9 +13,12 @@ def install(root, command_path=Path('/usr/local/bin/infrahub'), offline=False):
     if command_path.is_symlink() or (command_path.exists() and not command_path.read_text().startswith('#!/bin/sh\n'+marker)):
         raise ValueError('Existing unrelated infrahub command preserved')
     runtime=root/'.cli-venv'
-    if not offline:
+    wheels=root/'deploy/offline/wheels'
+    if offline and wheels.is_dir():
         subprocess.run(['python3','-m','venv',str(runtime)],check=True)
-        subprocess.run([str(runtime/'bin/python'),'-m','pip','install','--only-binary=:all:','--require-hashes','-r',str(root/'scripts/requirements.cli.lock')],check=True)
+        subprocess.run([str(runtime/'bin/python'),'-m','pip','install','--no-index','--find-links',str(wheels),'--only-binary=:all:','--require-hashes','-r',str(root/'scripts/requirements.cli.lock')],check=True)
+    elif not offline:
+        raise ValueError('Online application runtime setup disabled; use signed offline wheels')
     python=str(runtime/'bin/python') if (runtime/'bin/python').exists() else '/usr/bin/python3'
     content='#!/bin/sh\n'+marker+'exec '+shlex.quote(python)+' '+shlex.quote(str(root/'scripts/infrahub_cli.py'))+' --root '+shlex.quote(str(root))+' "$@"\n'
     command_path.write_text(content);os.chown(command_path,0,0);command_path.chmod(0o755)

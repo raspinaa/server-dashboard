@@ -61,6 +61,6 @@
 
 `install.py` پیش‌فرض فقط plan است؛ --apply مسیر استقرار آینده است. تشخیص OS/arch، بررسی امضا و checksum، حفاظت از نصب موجود و ساخت secret یکتا انجام می‌شود. ابزارهای backup/restore داده و کلید را حفظ می‌کنند؛ restore confirmation صریح می‌خواهد.
 
-`release.py` بسته محلی می‌سازد و امضا می‌کند، upload نمی‌کند. `fetch_release.py` فقط release پایدار مخزن پیکربندی‌شده را می‌خواند و credential را از فایل می‌گیرد. `upgrade.py` قفل، integrity، preflight، backup، maintenance، staging، migrations، restart و health را با دستورهای ثابت اجرا می‌کند؛ rollback schema خودکار نیست. `update_helper.py` بیرون HTTP اجرا می‌شود و version allowlisted می‌گیرد؛ وب Docker socket ندارد و state به‌روزرسانی را فقط read-only می‌بیند.
+`release.py` بسته محلی می‌سازد و امضا می‌کند، upload نمی‌کند. `build_offline.py` تصاویر و wheelها را روی ماشین متصل جمع می‌کند؛ `prepare-server.sh` تنها پیش‌نیازهای سرور را با اینترنت آماده می‌کند؛ `offline_install.py` نصب را از بسته محلی امضاشده انجام می‌دهد. دریافت GitHub در runtime حذف شده است. `upgrade.py` قفل، integrity، preflight، backup، maintenance، staging، migrations، restart و health را با دستورهای ثابت اجرا می‌کند؛ rollback schema خودکار نیست. `update_helper.py` بیرون HTTP اجرا می‌شود و version allowlisted می‌گیرد؛ وب Docker socket ندارد و state به‌روزرسانی را فقط read-only می‌بیند.
 
 برای جزئیات عملیاتی و محدوده آزمون‌ها، [عملیات](operations.fa.md)، [امنیت](security.fa.md)، [معماری/API](architecture.md) و [گزارش بررسی](verification.md) را بخوانید.

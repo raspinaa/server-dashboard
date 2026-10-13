@@ -43,6 +43,7 @@ def configure(root, host, tls, email='', dns='none', address='', bind='0.0.0.0',
     port = http if tls == 'none' else https
     origin = f'{scheme}://{host}' + (f':{port}' if port not in (80, 443) else '')
     values = {
+        'OFFLINE_MODE': '1',
         'APP_VERSION': (root / 'VERSION').read_text().strip(), 'TLS_MODE': tls,
         'SITE_ADDRESS': host, 'HTTP_PORT': str(http), 'HTTPS_PORT': str(https),
         'ACME_EMAIL': email, 'CADDY_CONFIG': f'./Caddyfile.{"http" if tls == "none" else tls}',
@@ -68,6 +69,9 @@ def configure(root, host, tls, email='', dns='none', address='', bind='0.0.0.0',
       context: ..
       dockerfile: deploy/dns/Dockerfile
     restart: unless-stopped
+    pull_policy: never
+    image: infrahub-dns:${{APP_VERSION}}
+    networks: [access]
     ports:
       - "{bind}:53:53/tcp"
       - "{bind}:53:53/udp"

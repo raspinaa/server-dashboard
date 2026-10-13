@@ -6,7 +6,6 @@
 
 import base64, hashlib, json, os, re
 from pathlib import Path
-import requests
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
@@ -28,52 +27,15 @@ def valid_version(v):
 
 
 def release_metadata(v=None):
-    repo = settings.RELEASE_REPOSITORY
-    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
-        raise ValidationError("مخزن انتشار توسط مسئول استقرار پیکربندی نشده است")
-    if settings.RELEASE_CHANNEL != "stable":
-        raise ValidationError("در این نسخه تنها کانال stable پشتیبانی می‌شود")
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    token_file = os.getenv("RELEASE_TOKEN_FILE")
-    if token_file:
-        headers["Authorization"] = "Bearer " + Path(token_file).read_text().strip()
-    endpoint = f"https://api.github.com/repos/{repo}/releases/" + (
-        "tags/v" + valid_version(v) if v else "latest"
-    )
+    path = settings.UPDATE_STATE / "offline-release.json"
     try:
-        r = requests.get(endpoint, headers=headers, timeout=20, allow_redirects=False)
-        r.raise_for_status()
-        data = r.json()
-        if data.get("draft") or data.get("prerelease"):
+        data = json.loads(path.read_text())
+        valid_version(data["version"])
+        if v and data["version"] != valid_version(v):
             raise ValueError()
-        ver = valid_version(data["tag_name"].removeprefix("v"))
-        assets = {a["name"]: a["url"] for a in data.get("assets", [])}
-        if not {
-            "manifest.json",
-            "manifest.sig",
-            "infrahub-" + ver + ".tar.gz",
-        }.issubset(assets):
-            raise ValueError()
-        return {
-            "version": ver,
-            "notes": data.get("body", "")[:30000],
-            "assets": assets,
-            "compatibility": {
-                "python": "3.12",
-                "mysql": "8.4 LTS",
-                "os": "Ubuntu 24.04",
-                "architectures": ["amd64"],
-                "signature": "Ed25519 manifest required",
-            },
-            "checked_at": timezone.now().isoformat(),
-        }
-    except (requests.RequestException, ValueError, KeyError):
-        raise ValidationError(
-            "دریافت انتشار ممکن نیست؛ دسترسی GitHub و ساختار انتشار را بررسی کنید"
-        )
+        return data
+    except (OSError, ValueError, KeyError):
+        raise ValidationError("بسته آفلاین آماده نشده است؛ مدیر روی سرور infrahub stage PACKAGE را اجرا کند")
 
 
 def check_release(user):

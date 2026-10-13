@@ -4,7 +4,7 @@ Uses fixed installation settings and an allowlisted SemVer release identifier.
 No HTTP caller can supply commands, paths, repositories or key material.
 """
 
-import json, os, re, time, urllib.request, fcntl, subprocess
+import json, os, re, time, fcntl, subprocess
 from pathlib import Path
 
 ROOT = Path(os.environ.get("INFRAHUB_ROOT", "/opt/infrahub")).resolve()
@@ -52,15 +52,10 @@ def main():
                 v = job["version"]
                 if not re.fullmatch(r"\d+\.\d+\.\d+", v):
                     raise ValueError("Invalid release identifier")
-                # Trust repository and token-file configuration on the host, never HTTP input.
+                # Only previously staged local packages may be used.
                 folder = ROOT / "state/releases" / v
                 if not (folder / "manifest.json").exists():
-                    from fetch_release import fetch
-
-                    config = json.loads((ROOT / "helper.json").read_text())
-                    fetch(
-                        config["repository"], v, folder, config.get("read_token_file")
-                    )
+                    raise ValueError("Offline package not staged on the host")
                 artifact = folder / f"infrahub-{v}.tar.gz"
                 manifest = folder / "manifest.json"
                 sig = folder / "manifest.sig"

@@ -24,6 +24,6 @@ with tarfile.open(sys.argv[1]) as t:
 RESTORE_PY
 # Restore encryption keys before restarting application; DB root credential must match backup config.
 bash scripts/compose.sh "$PWD" exec -T db sh -c 'if [ "${MYSQL_TARGET_HOST:-db}" = db ]; then export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; set -- -uroot; else export MYSQL_PWD="$MYSQL_PASSWORD"; set -- -h "$MYSQL_TARGET_HOST" -P "${MYSQL_PORT:-3306}" -u "$MYSQL_USER"; fi; exec mysql "$@"' < "$backup/database.sql"
-bash scripts/compose.sh "$PWD" up -d backend frontend
+bash scripts/compose.sh "$PWD" up -d --no-build --pull never backend frontend
 bash scripts/health.sh "$root"
 rm -f state/maintenance

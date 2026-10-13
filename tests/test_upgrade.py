@@ -7,6 +7,15 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 import upgrade
 
 
+@pytest.fixture(autouse=True)
+def mock_full_snapshot(monkeypatch):
+    def snapshot(root):
+        path=Path(root)/'state/backups/full-snapshot-fixture.tar.gz'
+        path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(b'synthetic-full-snapshot')
+        return path
+    monkeypatch.setattr(upgrade,'full_backup',snapshot)
+
+
 def package(tmp_path):
     folder = tmp_path / "release"
     folder.mkdir()
@@ -16,6 +25,9 @@ def package(tmp_path):
             "VERSION": "0.2.0\n",
             "backend/new.txt": "updated source",
             "scripts/health.sh": "echo local-fixture",
+            "deploy/offline/images.tar": "synthetic-image-fixture",
+            "deploy/offline/wheels/fixture.whl": "synthetic-wheel-fixture",
+            "scripts/install_cli.py": "print('fixture')",
         }.items():
             content = text.encode()
             entry = tarfile.TarInfo(name)
@@ -79,6 +91,8 @@ def test_upgrade_order_integrity_and_preservation(tmp_path, monkeypatch):
         < stages.index("healthy")
     )
     assert all(isinstance(c, list) for c in calls)
+    assert not any("build" in c or "pull" in c for c in calls)
+    assert any(c[:2] == ["docker", "load"] for c in calls)
 
 
 def test_failed_health_retains_backup_and_retry(tmp_path, monkeypatch):
@@ -106,7 +120,7 @@ def test_failed_health_retains_backup_and_retry(tmp_path, monkeypatch):
     j = json.loads((root / "state/upgrade-0.2.0.json").read_text())
     assert Path(j["backup"]).exists()
     result = upgrade.upgrade(root, *files, "0.2.0")
-    assert result == j["backup"] and not (root / "state/maintenance").exists()
+    assert result == j["full_snapshot"] and Path(result).exists() and not (root / "state/maintenance").exists()
 
 
 def test_failed_integrity_never_runs_commands(tmp_path, monkeypatch):
@@ -120,41 +134,20 @@ def test_failed_integrity_never_runs_commands(tmp_path, monkeypatch):
 
 
 def test_installer_existing_apply_is_idempotent(tmp_path, monkeypatch):
-    import install, sys
-
-    (tmp_path / ".env").write_text("CREDENTIAL_KEY=do-not-change")
-    called = []
-    original = Path.read_text
-
-    def read(p, *a, **kw):
-        return (
-            'ID=ubuntu\nVERSION_ID="24.04"\n'
-            if str(p) == "/etc/os-release"
-            else original(p, *a, **kw)
-        )
-
-    monkeypatch.setattr(Path, "read_text", read)
-    monkeypatch.setattr(install.platform, "machine", lambda: "x86_64")
-    monkeypatch.setattr(install.os, "geteuid", lambda: 0)
-    monkeypatch.setattr(install, "command", lambda *a: called.append(a))
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "install",
-            "--root",
-            str(tmp_path),
-            "--version",
-            "0.1.0",
-            "--public-key",
-            "unused",
-            "--apply",
-        ],
-    )
-    install.main()
-    assert (
-        called == [] and original(tmp_path / ".env") == "CREDENTIAL_KEY=do-not-change"
-    )
+    import offline_install
+    from test_operations import signed
+    folder=tmp_path/'package';folder.mkdir()
+    a,m,s,k=signed(folder,'0.1.0')
+    root=tmp_path/'installation';root.mkdir();(root/'.env').write_text('CREDENTIAL_KEY=do-not-change')
+    monkeypatch.setattr(offline_install.platform,'machine',lambda:'x86_64')
+    monkeypatch.setattr(offline_install.os,'geteuid',lambda:0)
+    monkeypatch.setattr(offline_install,'supported',lambda *a:True)
+    # Metadata fixture names Ubuntu; accept current test OS without changing host.
+    original=Path.read_text
+    monkeypatch.setattr(Path,'read_text',lambda p,*a,**kw:'ID=ubuntu\nVERSION_ID=24.04\n' if str(p)=='/etc/os-release' else original(p,*a,**kw))
+    called=[];monkeypatch.setattr(offline_install,'command',lambda *a:called.append(a))
+    offline_install.install_package(folder,k,root,'inventory.internal',apply=True)
+    assert called==[] and (root/'.env').read_text()=='CREDENTIAL_KEY=do-not-change'
 
 
 def test_release_build_excludes_runtime_keys(tmp_path):

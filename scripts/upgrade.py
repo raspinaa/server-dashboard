@@ -14,8 +14,13 @@ def run(args, cwd):
     subprocess.run(args, cwd=cwd, check=True, stdin=subprocess.DEVNULL)
 
 
+def full_backup(root):
+    from infrahub_cli import backup
+    return backup(root)
+
+
 def upgrade(
-    root, artifact, manifest, signature, key, version, progress=lambda stage: None
+    root, artifact, manifest, signature, key, version, progress=lambda stage: None, snapshot=None
 ):
     root = Path(root).resolve()
     if not (root / ".env").is_file():
@@ -44,6 +49,12 @@ def upgrade(
             progress(s)
 
         step("integrity_verified")
+        # Reject incomplete/online artifacts before entering maintenance or backups.
+        import tarfile
+        with tarfile.open(artifact) as package:
+            members = package.getmembers()
+            if not any(m.name == "deploy/offline/images.tar" and m.isfile() for m in members) or not any(m.name.startswith("deploy/offline/wheels/") and m.isfile() for m in members):
+                raise ValueError("Offline package images missing; no build/download permitted")
         installed = (root / "VERSION").read_text().strip()
         resume = bool(record["backup"] and (state / "maintenance").exists())
         if tuple(map(int, version.split("."))) <= tuple(
@@ -60,6 +71,8 @@ def upgrade(
         if not resume:
             run(["bash", str(root / "scripts/health.sh"), str(root)], root)
             step("preflight_passed")
+            record["full_snapshot"] = str(snapshot or full_backup(root))
+            step("full_snapshot_complete")
             backup = (
                 state / "backups" / ("upgrade-" + version + "-" + str(time.time_ns()))
             )
@@ -113,15 +126,25 @@ def upgrade(
         ]
         fd = os.open(env, os.O_WRONLY | os.O_TRUNC)
         os.fchmod(fd, 0o600)
+        values = dict(line.split("=", 1) for line in lines if "=" in line and not line.startswith("#"))
+        # Automatic public ACME cannot operate offline. Preserve encryption keys
+        # and old certificate files while selecting the local CA configuration.
+        transport = {}
+        if values.get("CADDY_CONFIG", "./Caddyfile") in {"./Caddyfile", "./Caddyfile.letsencrypt"} or values.get("TLS_MODE") == "letsencrypt":
+            transport = {"TLS_MODE": "local", "CADDY_CONFIG": "./Caddyfile.local"}
+        updated = {"APP_VERSION": version, "OFFLINE_MODE": "1", **transport}
         with os.fdopen(fd, "w") as f:
-            f.write("\n".join(lines + [f"APP_VERSION={version}"]) + "\n")
+            f.write("\n".join([line for line in lines if not any(line.startswith(key + "=") for key in updated)] + [key + "=" + value for key, value in updated.items()]) + "\n")
         offline = (stage / "deploy/offline/images.tar").is_file()
         if offline:
             run(
                 ["docker", "load", "-i", str(stage / "deploy/offline/images.tar")], root
             )
         else:
-            run(dc + ["build", "backend", "frontend"], root)
+            raise ValueError("Offline package images missing")
+        if (root / "scripts/install_cli.py").is_file():
+            import sys
+            run([sys.executable, str(root / "scripts/install_cli.py"), "--root", str(root), "--offline"], root)
         step("images_ready")
         run(
             dc
@@ -129,7 +152,7 @@ def upgrade(
                 "run",
                 "--rm",
                 "--pull",
-                "never" if offline else "missing",
+                "never",
                 "backend",
                 "python",
                 "backend/manage.py",
@@ -146,7 +169,7 @@ def upgrade(
                 "-d",
                 "--no-build",
                 "--pull",
-                "never" if offline else "missing",
+                "never",
                 "backend",
                 "frontend",
                 "proxy",
@@ -157,7 +180,7 @@ def upgrade(
         run(["bash", str(root / "scripts/health.sh"), str(root)], root)
         step("healthy")
         (state / "maintenance").unlink(missing_ok=True)
-        return str(backup)
+        return record.get("full_snapshot", str(backup))
     # Failures retain maintenance + journal + original backup. Never auto-roll back MySQL.
 
 

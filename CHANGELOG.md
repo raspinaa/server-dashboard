@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0 — Unreleased
+
+- Offline-only application installation and updates from copied signed packages.
+- One-command online Debian preparation; bundles include images and hash-locked CLI wheels.
+- Local update staging/dashboard metadata, internal backend/database networks and a LAN-facing web bridge and no automatic image pulls.
+- Breaking deployment change: GitHub/commit updates and runtime Let’s Encrypt are removed from the supported path. Existing data/keys are preserved; prepare a signed offline bundle for upgrade.
+
 ## 0.1.0 — Unreleased
 
 - Scoped management reports, resource graphs, service breakdowns and project-selectable XLSX exports.

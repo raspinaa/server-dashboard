@@ -16,7 +16,7 @@ extras=()
 for path in config data/caddy data/caddy-config data/tls helper.json release-public.key; do
   [[ ! -e "$path" ]] || extras+=("$path")
 done
-tar --exclude='state/staging' --exclude='state/backups' -czf "$dest/files.tar.gz.tmp" .env VERSION data/uploads state "${extras[@]}"
+tar --exclude='state/releases' --exclude='state/staging' --exclude='state/backups' -czf "$dest/files.tar.gz.tmp" .env VERSION data/uploads state "${extras[@]}"
 mv "$dest/files.tar.gz.tmp" "$dest/files.tar.gz"
 (cd "$dest" && sha256sum database.sql files.tar.gz > SHA256SUMS)
 printf 'Backup complete: %s\n' "$dest"

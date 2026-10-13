@@ -11,6 +11,11 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 VERSION = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
 
+def digest(path):
+    with Path(path).open('rb') as stream:
+        return hashlib.file_digest(stream, 'sha256').hexdigest()
+
+
 def verify(artifact, manifest, signature, public_key, expected_version=None):
     raw = Path(manifest).read_bytes()
     Ed25519PublicKey.from_public_bytes(
@@ -23,11 +28,11 @@ def verify(artifact, manifest, signature, public_key, expected_version=None):
         raise ValueError("Version mismatch")
     if (
         data.get("mysql") != "8.4"
-        or data.get("os") != "ubuntu-24.04"
+        or not (data.get("os") == "ubuntu-24.04" or set(data.get("platforms", [])) == {"debian-12", "debian-13", "ubuntu-24.04"})
         or "amd64" not in data.get("architectures", [])
     ):
         raise ValueError("Unsupported compatibility")
-    if hashlib.sha256(Path(artifact).read_bytes()).hexdigest() != data["sha256"]:
+    if digest(artifact) != data["sha256"]:
         raise ValueError("Artifact checksum mismatch")
     if Path(artifact).name != data["artifact"]:
         raise ValueError("Artifact name mismatch")
@@ -39,7 +44,7 @@ def extract(artifact, destination):
     target.mkdir(parents=True, exist_ok=True)
     with tarfile.open(artifact, "r:gz") as tar:
         members = tar.getmembers()
-        if len(members) > 20000 or sum(m.size for m in members) > 1024**3:
+        if len(members) > 20000 or sum(m.size for m in members) > 32 * 1024**3:
             raise ValueError("Archive limits exceeded")
         for m in members:
             if (
@@ -74,7 +79,7 @@ def build(root, output, signing_key):
         "test-results",
         "playwright-report",
     }
-    with tarfile.open(artifact, "w:gz") as tar:
+    with tarfile.open(artifact, "w:gz", compresslevel=3) as tar:
         for base, dirs, files in os.walk(root):
             dirs[:] = sorted(
                 d
@@ -120,10 +125,13 @@ def build(root, output, signing_key):
     data = {
         "version": ver,
         "artifact": artifact.name,
-        "sha256": hashlib.sha256(artifact.read_bytes()).hexdigest(),
+        "sha256": digest(artifact),
         "mysql": "8.4",
-        "os": "ubuntu-24.04",
+        "os": "linux-offline",
+        "platforms": ["debian-12", "debian-13", "ubuntu-24.04"],
+        "offline": (root / "deploy/offline/images.tar").is_file() and (root / "deploy/offline/wheels").is_dir(),
         "architectures": ["amd64"],
+        "notes": (root / "CHANGELOG.md").read_text()[:30000] if (root / "CHANGELOG.md").exists() else "",
         "migration_policy": "backup-required; compatible migrations only",
     }
     raw = (json.dumps(data, sort_keys=True, separators=(",", ":")) + "\n").encode()

@@ -100,23 +100,7 @@ def test_backup_rejects_recursive_destination(tmp_path,monkeypatch):
     runner.assert_not_called()
 
 
-def test_commit_build_failure_retains_backup_and_maintenance(tmp_path,monkeypatch):
-    root=tmp_path/'root';root.mkdir();(root/'state').mkdir();(root/'.env').write_text('PRIVATE_SETTING=preserve\nAPP_VERSION=0.1.0\n')
-    snapshot=tmp_path/'backup.tar.gz';snapshot.write_bytes(b'synthetic-backup')
-    commit='a'*40
-    monkeypatch.setattr('infrahub_cli.backup',lambda *args:snapshot)
-    monkeypatch.setattr('infrahub_cli.repository_config',lambda *args:{'repository':'example/project'})
-    def runner(args,cwd,**kwargs):
-        if args[:2]==['git','rev-parse']:return Mock(stdout=commit+'\n')
-        if args[:2]==['git','archive']:
-            output=Path(args[args.index('--output')+1])
-            with tarfile.open(output,'w') as stream:
-                for name in ['backend','frontend','deploy','scripts']:
-                    item=tarfile.TarInfo(name);item.type=tarfile.DIRTYPE;stream.addfile(item)
-                item=tarfile.TarInfo('VERSION');item.size=5;stream.addfile(item,io.BytesIO(b'0.2.0'))
-        if 'build' in args:raise RuntimeError('Synthetic build failure')
-        return Mock(stdout='')
-    monkeypatch.setattr('infrahub_cli.run',runner)
-    with pytest.raises(RuntimeError,match='build failure'):update_commit(root,commit)
-    assert snapshot.exists() and (root/'state/maintenance').exists()
-    assert 'PRIVATE_SETTING=preserve' in (root/'.env').read_text()
+def test_all_commit_updates_disabled_before_network(tmp_path,monkeypatch):
+    runner=Mock();monkeypatch.setattr('infrahub_cli.run',runner)
+    with pytest.raises(ValueError,match='disabled'):update_commit(tmp_path,'a'*40)
+    runner.assert_not_called()

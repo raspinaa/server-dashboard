@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Host-only administration: compressed backups, pinned updates and explicit restore."""
+"""Host-only administration: compressed backups, local signed updates and explicit restore."""
 import argparse
 from contextlib import contextmanager
 from datetime import datetime
@@ -13,7 +13,6 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
-import urllib.request
 from zoneinfo import ZoneInfo
 from deployment import compose_command
 
@@ -63,6 +62,9 @@ def source_archive(root, output):
             path = root / name
             if path.exists():
                 def include(info):
+                    # Images are already captured once in images.tar; keep wheels
+                    # for restoring the matching offline CLI dependencies.
+                    if info.name == 'deploy/offline/images.tar': return None
                     parts = Path(info.name).parts
                     if any(p in {'node_modules','__pycache__','.venv','media','dist','test-results','playwright-report'} for p in parts):
                         return None
@@ -133,6 +135,9 @@ def restore(root, archive):
         run(compose_command(root)+['stop','backend','frontend','proxy'], root)
         replace_source(root, stage)
         run(['docker','image','load','--input',str(folder/'images.tar')], root)
+        if (root/'deploy/offline/wheels').is_dir():
+            import sys
+            run([sys.executable,str(root/'scripts/install_cli.py'),'--root',str(root),'--offline'],root)
         run(['bash',str(root/'scripts/restore.sh'),str(root),str(folder),'--confirm-restore'], root)
         run(compose_command(root)+['up','-d','--no-build','--pull','never'], root)
         run(['bash',str(root/'scripts/health.sh'),str(root)], root)
@@ -151,85 +156,54 @@ def replace_source(root, stage):
         else: shutil.copy2(source,target)
 
 
-def repository_config(root):
-    config = json.loads((root/'helper.json').read_text()) if (root/'helper.json').exists() else {'repository':'raspinaa/server-dashboard'}
-    if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', config['repository']):
-        raise ValueError('Invalid configured repository')
-    return config
-
-
 def update_commit(root, commit):
-    if not re.fullmatch(r'[0-9a-fA-F]{40}', commit): raise ValueError('A full pinned commit is required')
-    config=repository_config(root)
-    snapshot=backup(root)
-    print('Rollback command: infrahub restore', snapshot, '--confirm')
-    with tempfile.TemporaryDirectory(dir=root/'state', prefix='commit-') as folder:
-        folder=Path(folder); checkout=folder/'checkout';checkout.mkdir()
-        env=os.environ.copy();env['GIT_TERMINAL_PROMPT']='0'
-        token=config.get('read_token_file')
-        if token:
-            token=Path(token).resolve()
-            if token.stat().st_mode & 0o077: raise ValueError('Read-only token file permissions must be 600/400')
-            askpass=folder/'askpass';askpass.write_text('#!/bin/sh\ncase "$1" in *Username*) printf "x-access-token\\n";; *) cat "$INFRAHUB_READ_TOKEN";; esac\n');askpass.chmod(0o700)
-            env.update(GIT_ASKPASS=str(askpass),INFRAHUB_READ_TOKEN=str(token))
-        run(['git','init','-q'],checkout,env=env)
-        run(['git','remote','add','origin','https://github.com/'+config['repository']+'.git'],checkout,env=env)
-        run(['git','fetch','--depth','1','origin',commit],checkout,env=env)
-        actual=run(['git','rev-parse','FETCH_HEAD'],checkout,capture_output=True,text=True).stdout.strip()
-        if actual != commit.lower(): raise ValueError('Downloaded commit mismatch')
-        archive=folder/'source.tar'
-        run(['git','archive','--format=tar','--output',str(archive),'FETCH_HEAD'],checkout)
-        # Select only application source; other tracked files are irrelevant to deployment.
-        stage=folder/'stage';stage.mkdir()
-        with tarfile.open(archive) as stream:
-            selected=[m for m in stream.getmembers() if Path(m.name).parts[0] in SOURCE]
-            selected_archive=folder/'selected.tar'
-            with tarfile.open(selected_archive,'w') as output:
-                for m in selected: output.addfile(m,stream.extractfile(m) if m.isfile() else None)
-        safe_extract(selected_archive,stage,set(SOURCE))
-        if not all((stage/name).exists() for name in ('backend','frontend','deploy','scripts','VERSION')):
-            raise ValueError('Incomplete source checkout')
-        (root/'state/maintenance').touch()
-        run(compose_command(root)+['stop','backend','frontend'],root)
-        replace_source(root,stage)
-        (root/'.infrahub-source-commit').write_text(actual+'\n')
-        env_file=root/'.env';lines=env_file.read_text().splitlines()
-        # A distinct image tag preserves the previous images for rollback.
-        tag=(root/'VERSION').read_text().strip()+'-'+actual[:12]
-        env_file.write_text('\n'.join(line for line in lines if not line.startswith('APP_VERSION='))+'\nAPP_VERSION='+tag+'\n');env_file.chmod(0o600)
-        dc=compose_command(root)
-        run(dc+['build','backend','frontend'],root)
-        run(dc+['run','--rm','backend','python','backend/manage.py','migrate','--noinput'],root)
-        run(dc+['up','-d'],root)
-        run(['bash',str(root/'scripts/health.sh'),str(root)],root)
-        (root/'state/maintenance').unlink(missing_ok=True)
-        print('Updated to pinned commit:',actual)
+    raise ValueError('GitHub/commit updates disabled: copy a signed offline package and run infrahub update PACKAGE')
 
 
-def update_release(root, version=None):
-    from fetch_release import fetch
+def stage_package(root, package):
+    from offline_install import package_files
+    from release import verify
+    artifact, manifest, signature, metadata=package_files(package)
+    key=root/'release-public.key'
+    verify(artifact,manifest,signature,key,metadata['version'])
+    if not metadata.get('offline'):
+        raise ValueError('A complete offline bundle is required')
+    with tarfile.open(artifact) as archive:
+        names=archive.getnames()
+        if 'deploy/offline/images.tar' not in names or not any(name.startswith('deploy/offline/wheels/') and name.endswith('.whl') for name in names):
+            raise ValueError('Offline images/wheels are missing')
+    folder=root/'state/releases'/metadata['version']
+    if folder.exists():
+        if digest(folder/artifact.name)!=digest(artifact):raise ValueError('Different package already staged for this version')
+    else:
+        folder.mkdir(parents=True,mode=0o750)
+        for path in [artifact,manifest,signature]:shutil.copy2(path,folder/path.name)
+    # Only safe metadata is exposed to the read-only dashboard mount.
+    public={'version':metadata['version'],'notes':metadata.get('notes','Offline package copied by administrator'),
+            'compatibility':{'platforms':metadata.get('platforms',[metadata.get('os')]),'mysql':metadata['mysql'],'architectures':metadata['architectures'],'signature':'Verified Ed25519'},'checked_at':datetime.now(ZoneInfo('Asia/Tehran')).isoformat()}
+    info=root/'state/offline-release.json';info.write_text(json.dumps(public));info.chmod(0o640);os.chown(info,0,10001)
+    return folder,metadata
+
+
+def update_release(root, package=None, version=None, stage_only=False):
+    from offline_install import package_files
     from release import verify
     from upgrade import upgrade
-    config=repository_config(root)
+    if package:
+        folder,metadata=stage_package(root,package)
+    else:
+        folders=list((root/'state/releases').glob('*/manifest.json'))
+        if version:folders=[p for p in folders if p.parent.name==version]
+        if not folders:raise ValueError('No local package: copy it and run infrahub update PACKAGE')
+        folder=max(folders,key=lambda p:tuple(map(int,p.parent.name.split('.')))).parent
+        _,_,_,metadata=package_files(folder)
+    artifact,manifest,signature,_=package_files(folder)
     key=root/'release-public.key'
-    if not key.is_file(): raise ValueError('Configure release-public.key first, or use update --commit FULL_COMMIT')
+    verify(artifact,manifest,signature,key,metadata['version'])
+    if stage_only:print('Verified package staged:',metadata['version']);return
     snapshot=backup(root)
-    print('Rollback command: infrahub restore', snapshot, '--confirm')
-    if version is None:
-        headers={'Accept':'application/vnd.github+json'}
-        if config.get('read_token_file'): headers['Authorization']='Bearer '+Path(config['read_token_file']).read_text().strip()
-        import requests
-        response=requests.get('https://api.github.com/repos/'+config['repository']+'/releases/latest',headers=headers,timeout=30,allow_redirects=False)
-        if response.status_code != 200: raise ValueError('Stable release unavailable; check access or use an explicit pinned commit')
-        metadata=response.json()
-        if metadata.get('draft') or metadata.get('prerelease'): raise ValueError('Stable release required')
-        version=metadata.get('tag_name','').removeprefix('v')
-    if not re.fullmatch(r'\d+\.\d+\.\d+',version): raise ValueError('Invalid release version')
-    folder=root/'state/releases'/version
-    fetch(config['repository'],version,folder,config.get('read_token_file'))
-    artifact=folder/f'infrahub-{version}.tar.gz'
-    verify(artifact,folder/'manifest.json',folder/'manifest.sig',key,version)
-    upgrade(root,artifact,folder/'manifest.json',folder/'manifest.sig',key,version,lambda stage:print('Update:',stage))
+    print('Rollback command: infrahub restore',snapshot,'--confirm')
+    upgrade(root,artifact,manifest,signature,key,metadata['version'],lambda step:print('Update:',step),snapshot=snapshot)
 
 
 def main():
@@ -237,7 +211,8 @@ def main():
     parser.add_argument('--root',default=os.environ.get('INFRAHUB_ROOT','/opt/infrahub'))
     commands=parser.add_subparsers(dest='command',required=True)
     b=commands.add_parser('backup');b.add_argument('--destination')
-    u=commands.add_parser('update');g=u.add_mutually_exclusive_group();g.add_argument('--version');g.add_argument('--commit')
+    u=commands.add_parser('update');u.add_argument('package',nargs='?');u.add_argument('--version')
+    stage=commands.add_parser('stage');stage.add_argument('package')
     r=commands.add_parser('restore');r.add_argument('archive');r.add_argument('--confirm',action='store_true')
     args=parser.parse_args();root=Path(args.root).resolve()
     if os.geteuid()!=0: parser.error('Run administration commands with sudo')
@@ -246,12 +221,12 @@ def main():
     if args.command=='restore' and not args.confirm: parser.error('Restore overwrites data; add --confirm')
     try:
         with lock(root):
-            if args.command=='update' and not args.commit: update_release(root,args.version)
+            if args.command in {'update','stage'}: update_release(root,args.package,getattr(args,'version',None),stage_only=args.command=='stage')
             else:
                 with lock(root,'update.lock'):
                     if args.command=='backup': backup(root,args.destination)
                     elif args.command=='restore': restore(root,args.archive)
-                    else: update_commit(root,args.commit)
+                    else: raise ValueError('Unsupported command')
     except ValueError as error:
         raise SystemExit(str(error)+"; existing backup retained.")
     except Exception:

@@ -6,7 +6,7 @@ Requires=docker.service
 Type=simple
 Environment=INFRAHUB_ROOT=/opt/infrahub
 WorkingDirectory=/opt/infrahub
-ExecStart=/opt/infrahub/helper-venv/bin/python /opt/infrahub/scripts/update_helper.py
+ExecStart=/opt/infrahub/.cli-venv/bin/python /opt/infrahub/scripts/update_helper.py
 Restart=on-failure
 RestartSec=10
 UMask=0077

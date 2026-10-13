@@ -3,6 +3,7 @@ services:
   db:
     image: mysql:8.4.11
     restart: unless-stopped
+    pull_policy: never
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?required}
       MYSQL_TARGET_HOST: ${MYSQL_HOST:-db}
@@ -21,12 +22,14 @@ services:
       retries: 60
     networks: [internal]
   backend:
-    image: infrahub-backend:${APP_VERSION:-0.1.0}
+    image: infrahub-backend:${APP_VERSION:-0.2.0}
     build: {context: .., dockerfile: backend/Dockerfile}
     restart: unless-stopped
+    pull_policy: never
     environment:
       DEBUG: "0"
-      TLS_MODE: ${TLS_MODE:-letsencrypt}
+      OFFLINE_MODE: "1"
+      TLS_MODE: ${TLS_MODE:-local}
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?required}
       CREDENTIAL_KEY: ${CREDENTIAL_KEY:?required}
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:?required}
@@ -55,19 +58,22 @@ services:
     tmpfs: [/tmp]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    networks: [internal, egress]
+    networks: [internal]
   frontend:
-    image: infrahub-frontend:${APP_VERSION:-0.1.0}
+    image: infrahub-frontend:${APP_VERSION:-0.2.0}
     build: {context: .., dockerfile: frontend/Dockerfile}
     restart: unless-stopped
+    pull_policy: never
     read_only: true
     tmpfs: [/tmp, /var/cache/nginx, /var/run]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     networks: [internal]
   proxy:
-    image: caddy:2-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
+    image: infrahub-proxy:${APP_VERSION:-0.2.0}
+    build: {context: .., dockerfile: deploy/proxy/Dockerfile}
     restart: unless-stopped
+    pull_policy: never
     environment:
       SITE_ADDRESS: ${SITE_ADDRESS:?required}
       ACME_EMAIL: ${ACME_EMAIL:-}
@@ -75,12 +81,15 @@ services:
       UPLOAD_LIMIT_MB: ${UPLOAD_LIMIT_MB:-10}
     ports: ["${HTTP_PORT:?HTTP_PORT required}:80", "${HTTPS_PORT:?HTTPS_PORT required}:443"]
     volumes:
-      - ${CADDY_CONFIG:-./Caddyfile}:/etc/caddy/Caddyfile:ro
+      - ${CADDY_CONFIG:-./Caddyfile.local}:/etc/caddy/Caddyfile:ro
       - ../data/tls:/etc/caddy/tls:ro
       - ../data/caddy:/data
       - ../data/caddy-config:/config
     depends_on: [backend,frontend]
-    networks: [internal, egress]
+    networks: [access, internal]
 networks:
   internal: {internal: true}
-  egress: {}
+  access:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"

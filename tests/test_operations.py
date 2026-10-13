@@ -61,38 +61,11 @@ def test_archive_traversal(tmp_path, name):
         extract(archive, tmp_path / "out")
 
 
-def test_installer_platform_and_existing(tmp_path):
-    assert supported({"ID": "ubuntu", "VERSION_ID": "24.04"}, "x86_64")
-    assert not supported({"ID": "ubuntu", "VERSION_ID": "22.04"}, "x86_64")
-    assert not supported({"ID": "ubuntu", "VERSION_ID": "24.04"}, "aarch64")
-    assert not existing(tmp_path)
-    (tmp_path / ".env").write_text("CREDENTIAL_KEY=keep")
-    assert existing(tmp_path)
-
-
-def test_installer_plan_no_mutation(tmp_path):
-    p = Path(__file__).resolve().parents[1]
-    r = subprocess.run(
-        [
-            str(p / ".venv/bin/python")
-            if (p / ".venv/bin/python").exists()
-            else "python",
-            str(p / "scripts/install.py"),
-            "--root",
-            str(tmp_path / "install"),
-            "--version",
-            "0.1.0",
-            "--public-key",
-            str(tmp_path / "unused"),
-        ],
-        capture_output=True,
-        text=True,
-    )
-    assert (
-        r.returncode == 0
-        and "Plan:" in r.stdout
-        and not (tmp_path / "install").exists()
-    )
+def test_installer_plan_is_read_only(tmp_path):
+    from offline_install import install_package
+    a,m,s,k=signed(tmp_path,'0.1.0')
+    install_package(tmp_path,k,tmp_path/'install','inventory.internal',apply=False)
+    assert not (tmp_path/'install').exists()
 
 
 def test_compose_storage_and_boundaries():
@@ -119,41 +92,28 @@ def test_compose_storage_and_boundaries():
 
 def test_update_permission_and_lock(setup):
     a, *_ = setup
-    SystemSetting.objects.create(key="release_check", value={"version": "0.2.0"})
+    SystemSetting.objects.create(key="release_check", value={"version": "0.3.0"})
     u = User.objects.create_user("ordinary")
     with pytest.raises(Exception):
-        queue_update(u, "0.2.0")
-    r = queue_update(a, "0.2.0")
+        queue_update(u, "0.3.0")
+    r = queue_update(a, "0.3.0")
     assert r.status == "queued"
     with pytest.raises(Exception):
-        queue_update(a, "0.2.0")
+        queue_update(a, "0.3.0")
     with pytest.raises(Exception):
-        queue_update(a, "0.2.0;touch /tmp/x")
+        queue_update(a, "0.3.0;touch /tmp/x")
 
 
-def test_release_check_mock(setup, settings, monkeypatch):
-    settings.RELEASE_REPOSITORY = "example/infrahub"
-    fake = Mock()
-    fake.status_code = 200
-    fake.json.return_value = {
-        "tag_name": "v0.2.0",
-        "body": "Notes",
-        "assets": [
-            {"name": n, "url": "https://api.github.com/asset"}
-            for n in ["manifest.json", "manifest.sig", "infrahub-0.2.0.tar.gz"]
-        ],
-    }
-    monkeypatch.setattr("core.updates.requests.get", lambda *a, **kw: fake)
-    assert check_release(setup[0])["version"] == "0.2.0"
+def test_release_check_local_package(setup, settings, monkeypatch):
     import requests
-
-    def fail(*a, **kw):
-        raise requests.ConnectionError("token-must-not-appear")
-
-    monkeypatch.setattr("core.updates.requests.get", fail)
-    with pytest.raises(Exception) as e:
-        check_release(setup[0])
-    assert "token-must-not-appear" not in str(e.value)
+    monkeypatch.setattr(requests, 'get', lambda *a, **kw: (_ for _ in ()).throw(AssertionError('No network permitted')))
+    settings.UPDATE_STATE.mkdir()
+    path=settings.UPDATE_STATE/'offline-release.json'
+    path.write_text(json.dumps({'version':'0.3.0','notes':'Local package','compatibility':{'offline':True}}))
+    assert check_release(setup[0])['version']=='0.3.0'
+    path.unlink()
+    with pytest.raises(Exception) as error:check_release(setup[0])
+    assert 'GitHub' not in str(error.value)
 
 
 def test_update_claim_rechecks_permission(setup):
@@ -161,8 +121,8 @@ def test_update_claim_rechecks_permission(setup):
 
     a, *_ = setup
     u = User.objects.create_user("updater", independent_permissions=["perform_updates"])
-    SystemSetting.objects.create(key="release_check", value={"version": "0.2.0"})
-    r = queue_update(u, "0.2.0")
+    SystemSetting.objects.create(key="release_check", value={"version": "0.3.0"})
+    r = queue_update(u, "0.3.0")
     u.independent_permissions = []
     u.save()
     from unittest.mock import patch

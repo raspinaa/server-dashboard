@@ -57,7 +57,7 @@ def test_shell_syntax_and_read_only_help():
     subprocess.run(['bash', '-n', str(script)], check=True)
     result = subprocess.run(['bash', str(script), '--help'], capture_output=True, text=True, check=True)
     assert 'Inspection' not in result.stdout or result.returncode == 0
-    assert '--apply' in result.stdout and '--commit' in result.stdout
+    assert '--apply' in result.stdout and 'offline' in result.stdout
 
 
 def test_distinct_random_keys(tmp_path):
