@@ -8,7 +8,7 @@ cd "$root"
 mkdir -p "$dest"
 dest=$(realpath "$dest")
 [[ ! -e "$dest/database.sql" && ! -e "$dest/files.tar.gz" ]] || { echo 'Backup destination is not empty' >&2; exit 1; }
-bash scripts/compose.sh "$PWD" exec -T db sh -c 'if [ "${MYSQL_TARGET_HOST:-db}" = db ]; then export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; set -- -uroot; else export MYSQL_PWD="$MYSQL_PASSWORD"; set -- -h "$MYSQL_TARGET_HOST" -P "${MYSQL_PORT:-3306}" -u "$MYSQL_USER"; fi; exec mysqldump "$@" --single-transaction --routines --triggers --events --hex-blob --set-gtid-purged=OFF --databases "$MYSQL_DATABASE"' > "$dest/database.sql.tmp"
+bash scripts/compose.sh "$PWD" exec -T db sh -c 'if [ "${MYSQL_TARGET_HOST:-db}" = db ]; then export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; set -- -uroot; else export MYSQL_PWD="$MYSQL_PASSWORD"; set -- -h "$MYSQL_TARGET_HOST" -P "${MYSQL_PORT:-3306}" -u "$MYSQL_USER"; fi; exec mysqldump "$@" --single-transaction --add-drop-database --routines --triggers --events --hex-blob --set-gtid-purged=OFF --databases "$MYSQL_DATABASE"' > "$dest/database.sql.tmp"
 [[ -s "$dest/database.sql.tmp" ]] || { echo 'Empty database backup' >&2; exit 1; }
 mv "$dest/database.sql.tmp" "$dest/database.sql"
 # Application uploads are immutable encrypted workbooks. Include config and keys.

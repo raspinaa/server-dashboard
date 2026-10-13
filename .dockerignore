@@ -12,3 +12,5 @@ artifacts
 
 # Operator-generated site configuration lives outside replaceable source.
 /config/
+
+.cli-venv/

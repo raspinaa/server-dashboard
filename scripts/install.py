@@ -276,6 +276,9 @@ def main():
     command(
         dc + ["up", "-d", "--no-build", "--pull", "never" if a.offline else "missing"]
     )
+    if not a.offline:
+        command(["apt-get", "install", "--no-remove", "-y", "python3-venv"])
+    command([sys.executable, str(root / "scripts/install_cli.py"), "--root", str(root)] + (["--offline"] if a.offline else []))
     command(["bash", str(root / "scripts/health.sh"), str(root)])
     print(
         "Installation health checks passed. URL: https://"

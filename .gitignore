@@ -31,3 +31,7 @@ secrets/
 
 # Operator-generated site configuration lives outside replaceable source.
 /config/
+
+.cli-venv/
+
+/frontend/node_modules

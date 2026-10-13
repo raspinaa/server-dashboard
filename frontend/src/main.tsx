@@ -78,6 +78,7 @@ const nav = [
   ["projects", "پروژه‌ها و محیط‌ها", "◈"],
   ["imports", "مرکز ورود Excel", "↓"],
   ["exports", "مرکز خروجی Excel", "↑"],
+  ["reports", "گزارش مدیریتی", "▤"],
   ["access", "کاربران و دسترسی", "♧"],
   ["audit", "رویدادهای سیستم", "◷"],
   ["settings", "تنظیمات و به‌روزرسانی", "⚙"],
@@ -216,7 +217,7 @@ function App() {
                   setSuccess("");
                 }}
               >
-                <span>{i}</span>
+                <span aria-hidden="true">{i}</span>
                 {t}
               </button>
             ))}
@@ -310,6 +311,20 @@ function App() {
             <AuditPage run={run} />
           ) : section === "settings" ? (
             <Settings user={user} run={run} notice={setSuccess} />
+          ) : section === "reports" ? (
+            <ManagementReports
+              projects={projects}
+              epoch={epoch}
+              run={run}
+              notice={setSuccess}
+            />
+          ) : section === "exports" ? (
+            <Exports
+              project={project}
+              projects={projects}
+              run={run}
+              notice={setSuccess}
+            />
           ) : !project ? (
             <div className="empty">
               <h2>پروژه‌ای انتخاب نشده است</h2>
@@ -340,7 +355,12 @@ function App() {
               notice={setSuccess}
             />
           ) : (
-            <Exports project={project} run={run} notice={setSuccess} />
+            <Exports
+              project={project}
+              projects={projects}
+              run={run}
+              notice={setSuccess}
+            />
           )}
         </main>
         <footer>
@@ -1939,14 +1959,21 @@ function Imports({
   );
 }
 function Exports({
-  project,
+  project: initialProject,
+  projects,
   run,
   notice,
 }: {
-  project: Project;
+  project: Project | null | undefined;
+  projects: Project[];
   run: Run;
   notice: (s: string) => void;
 }) {
+  const [selected, setSelected] = useState(initialProject?.id || 0);
+  const project = projects.find((p) => p.id === selected);
+  useEffect(() => {
+    setSelected(initialProject?.id || 0);
+  }, [initialProject?.id]);
   return (
     <section className="panel">
       <h2>خروجی از داده‌های فعلی پایگاه داده</h2>
@@ -1954,54 +1981,81 @@ function Exports({
         مقادیر ویرایش‌شده در وب، ستون‌های مستقل دیسک و UUID مخفی در خروجی حفظ
         می‌شوند. رمزها به‌صورت پیش‌فرض حذف شده‌اند.
       </p>
-      <form
-        className="formgrid"
-        onSubmit={(e) => {
-          e.preventDefault();
-          const d = Object.fromEntries(new FormData(e.currentTarget));
-          run(async () => {
-            await download(`projects/${project.id}/exports/`, {
-              ...d,
-              credentials: d.credentials === "on",
-              merged: d.merged === "on",
-              environment: d.environment || null,
+      <label>
+        پروژه خروجی
+        <select
+          aria-label="پروژه خروجی"
+          value={selected}
+          onChange={(e) => setSelected(Number(e.target.value))}
+        >
+          <option value={0}>انتخاب پروژه برای خروجی</option>
+          {projects.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      {project && (
+        <form
+          key={project.id}
+          className="formgrid"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const d = Object.fromEntries(new FormData(e.currentTarget));
+            run(async () => {
+              await download(`projects/${project.id}/exports/`, {
+                ...d,
+                credentials: d.credentials === "on",
+                merged: d.merged === "on",
+                environment: d.environment || null,
+              });
+              notice("فایل خروجی دریافت شد");
             });
-            notice("فایل خروجی دریافت شد");
-          });
-        }}
-      >
-        <label>
-          نوع
-          <select name="kind">
-            <option value="inventory">موجودی ماشین‌ها</option>
-            <option value="activity">فعالیت و تغییرات</option>
-          </select>
-        </label>
-        <label>
-          محیط
-          <select name="environment">
-            <option value="">کل پروژه</option>
-            {project.environments.map((e) => (
-              <option key={e.id} value={e.id}>
-                {e.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="check">
-          <input type="checkbox" name="merged" defaultChecked />
-          ادغام سلول‌های محیط و Application
-        </label>
-        <label className="check">
-          <input
-            type="checkbox"
-            name="credentials"
-            disabled={!project.permissions.includes("credential_export")}
-          />
-          خروجی رمز با مجوز مستقل (فایل حساس)
-        </label>
-        <button>دریافت XLSX</button>
-      </form>
+          }}
+        >
+          <label>
+            نوع
+            <select name="kind">
+              <option value="inventory">موجودی ماشین‌ها</option>
+              <option value="activity">فعالیت و تغییرات</option>
+            </select>
+          </label>
+          <label>
+            محیط
+            <select name="environment">
+              <option value="">کل پروژه</option>
+              {project.environments.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="check">
+            <input type="checkbox" name="merged" defaultChecked />
+            ادغام سلول‌های محیط و Application
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              name="credentials"
+              disabled={!project.permissions.includes("credential_export")}
+            />
+            خروجی رمز با مجوز مستقل (فایل حساس)
+          </label>
+          <button
+            disabled={
+              !(
+                ["editor", "manager"].includes(project.role) ||
+                project.permissions.includes("export")
+              )
+            }
+          >
+            دریافت XLSX
+          </button>
+        </form>
+      )}
       <p className="warning">
         فایل رمزدار پس از دانلود تحت کنترل دریافت‌کننده است. فایل خروجی روی سرور
         ذخیره نمی‌شود و هر درخواست دوباره مجوزسنجی می‌شود.
@@ -2514,3 +2568,381 @@ function Settings({
   );
 }
 createRoot(document.getElementById("root")!).render(<App />);
+
+function ManagementReports({
+  projects,
+  epoch,
+  run,
+  notice,
+}: {
+  projects: Project[];
+  epoch: number;
+  run: Run;
+  notice: (s: string) => void;
+}) {
+  const [pid, setPid] = useState(0);
+  const [env, setEnv] = useState("");
+  const [detailPage, setDetailPage] = useState(1);
+  const [report, setReport] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [revision, setRevision] = useState(0);
+  const project = projects.find((p) => p.id === pid) || null;
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError("");
+    setReport(null);
+    const query = new URLSearchParams();
+    if (pid) query.set("project", String(pid));
+    if (env) query.set("environment", env);
+    query.set("page", String(detailPage));
+    api("reports/?" + query)
+      .then((data) => {
+        if (active) setReport(data);
+      })
+      .catch((e) => {
+        if (active) setError(String(e.message));
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [pid, env, epoch, revision, detailPage]);
+  const number = (value: any) => Number(value || 0).toLocaleString("fa-IR");
+  const label = (row: any) =>
+    row.environment__name ||
+    row.application__name ||
+    row.project__name ||
+    row.os ||
+    "ثبت‌نشده";
+  const chart = (rows: any[], key: string, title: string, unit: string) => (
+    <section className="panel">
+      <h3>
+        {title} · {unit}
+      </h3>
+      {rows.length ? (
+        rows.map((row, i) => (
+          <div className="barrow" key={i}>
+            <span>{label(row)}</span>
+            <div className="bartrack">
+              <i
+                style={{
+                  width: `${(100 * Number(row[key])) / Math.max(1, ...rows.map((r) => Number(r[key])))}%`,
+                }}
+              />
+            </div>
+            <strong>{number(row[key])}</strong>
+          </div>
+        ))
+      ) : (
+        <p>داده‌ای ثبت نشده است.</p>
+      )}
+    </section>
+  );
+  const table = (title: string, rows: any[], getName: (row: any) => string) => (
+    <section className="panel">
+      <h3>{title}</h3>
+      <div className="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th>عنوان</th>
+              <th>ماشین</th>
+              <th>CPU (Core)</th>
+              <th>RAM (GB)</th>
+              <th>Disk (GB)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, i) => (
+              <tr key={i}>
+                <td>{getName(row)}</td>
+                <td>{number(row.machines)}</td>
+                <td>{number(row.cpu)}</td>
+                <td>{number(row.ram)}</td>
+                <td>{number(row.disk)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!rows.length && <p>رکوردی وجود ندارد.</p>}
+      </div>
+    </section>
+  );
+  return (
+    <section>
+      <div className="sectionhead">
+        <h2>داشبورد گزارش مدیریتی</h2>
+        <button className="ghost" onClick={() => setRevision((r) => r + 1)}>
+          تازه‌سازی گزارش
+        </button>
+      </div>
+      <p>
+        فقط پروژه‌های مجاز شما؛ منابع تخصیص‌یافته از موجودی ثبت‌شده، بدون پایش
+        زنده. موارد ناقص شاخص کیفیت اطلاعات هستند، نه سلامت زیرساخت.
+      </p>
+      <div className="formgrid">
+        <label>
+          پروژه گزارش
+          <select
+            aria-label="پروژه گزارش"
+            value={pid}
+            onChange={(e) => {
+              setPid(Number(e.target.value));
+              setEnv("");
+              setDetailPage(1);
+            }}
+          >
+            <option value={0}>همه پروژه‌های مجاز</option>
+            {projects
+              .filter((p) => !p.archived)
+              .map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+          </select>
+        </label>
+        <label>
+          محیط گزارش
+          <select
+            aria-label="محیط گزارش"
+            value={env}
+            disabled={!project}
+            onChange={(e) => {
+              setEnv(e.target.value);
+              setDetailPage(1);
+            }}
+          >
+            <option value="">همه محیط‌ها</option>
+            {project?.environments
+              .filter((e) => !e.archived)
+              .map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.name}
+                </option>
+              ))}
+          </select>
+        </label>
+      </div>
+      {loading && <p role="status">در حال محاسبه گزارش…</p>}
+      {error && (
+        <p role="alert" className="error">
+          {error}
+        </p>
+      )}
+      {report && (
+        <>
+          <p>
+            زمان تهیه: {time(report.generated_at)} ·{" "}
+            {project ? project.name : "کل پروژه‌های مجاز"}
+          </p>
+          <div className="metrics">
+            {[
+              [report.project_count, "پروژه"],
+              [report.environment_count, "محیط"],
+              [report.totals.machines, "ماشین"],
+              [report.disk_count, "دیسک"],
+              [report.totals.cpu, "CPU (Core)"],
+              [report.totals.ram, "RAM (GB)"],
+              [report.totals.disk, "Disk (GB)"],
+            ].map(([value, name]) => (
+              <div className="metric" key={String(name)}>
+                <span>{name}</span>
+                <strong>{number(value)}</strong>
+              </div>
+            ))}
+          </div>
+          <div className="graphs">
+            {chart(
+              project ? report.environments : report.projects,
+              "cpu",
+              project ? "CPU به تفکیک محیط" : "CPU به تفکیک پروژه",
+              "Core",
+            )}
+            {chart(
+              project ? report.environments : report.projects,
+              "ram",
+              project ? "RAM به تفکیک محیط" : "RAM به تفکیک پروژه",
+              "GB",
+            )}
+            {chart(
+              project ? report.environments : report.projects,
+              "disk",
+              project ? "دیسک به تفکیک محیط" : "دیسک به تفکیک پروژه",
+              "GB",
+            )}
+          </div>
+          <div className="graphs">
+            {chart(
+              report.operating_systems,
+              "machines",
+              "توزیع سیستم‌عامل",
+              "ماشین",
+            )}
+            {chart(
+              [...report.services]
+                .sort((a: any, b: any) => b.machines - a.machines)
+                .slice(0, 20),
+              "machines",
+              "۲۰ سرویس با بیشترین ماشین",
+              "ماشین",
+            )}
+          </div>
+          <section className="panel">
+            <h3>توزیع وضعیت گردش کار</h3>
+            {report.statuses.map((s: any) => (
+              <p key={s.status}>
+                {statusLabels[s.status]}: {number(s.machines)}
+              </p>
+            ))}
+          </section>
+          {table("جزئیات پروژه‌ها", report.projects, (r) => r.project__name)}
+          {table(
+            "جزئیات محیط‌ها",
+            report.environments,
+            (r) => `${r.project__name} / ${r.environment__name}`,
+          )}
+          {table(
+            "سرویس‌ها و Applicationها",
+            report.services,
+            (r) => `${r.project__name} / ${r.application__name || "ثبت‌نشده"}`,
+          )}
+          {table(
+            "سیستم‌عامل‌ها",
+            report.operating_systems,
+            (r) => r.os || "ثبت‌نشده",
+          )}
+          {table(
+            "شبکه‌ها",
+            report.networks,
+            (r) =>
+              `${r.project__name} / ${r.environment__name} / ${r.network || "ثبت‌نشده"}`,
+          )}
+          <section className="panel">
+            <h3>جزئیات ماشین‌ها</h3>
+            <div className="tablewrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>پروژه</th>
+                    <th className="sticky">Server Name</th>
+                    <th>Environment</th>
+                    <th>Application</th>
+                    <th>VMs</th>
+                    <th>CPU (Core)</th>
+                    <th>RAM (GB)</th>
+                    {Array.from(
+                      {
+                        length: Math.max(
+                          0,
+                          ...report.machines.map((m: any) => m.disks.length),
+                        ),
+                      },
+                      (_, i) => (
+                        <th key={i}>Disk {i + 1} (GB)</th>
+                      ),
+                    )}
+                    <th>OS</th>
+                    <th>Network / VLAN</th>
+                    <th>Server IP Addr</th>
+                    <th>Subnet (CIDR)</th>
+                    <th>GW IP Addr</th>
+                    <th>Username</th>
+                    <th>وضعیت</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.machines.map((m: any) => (
+                    <tr key={m.id}>
+                      <td>{m.project_name}</td>
+                      <td className="sticky">{m.server_name}</td>
+                      <td>{m.environment_name}</td>
+                      <td>{m.application}</td>
+                      <td>{m.vms}</td>
+                      <td>{number(m.cpu)}</td>
+                      <td>{number(m.ram)}</td>
+                      {Array.from(
+                        {
+                          length: Math.max(
+                            0,
+                            ...report.machines.map(
+                              (row: any) => row.disks.length,
+                            ),
+                          ),
+                        },
+                        (_, i) => (
+                          <td key={i} title={m.disks[i]?.name}>
+                            {m.disks[i] ? number(m.disks[i].size) : "—"}
+                          </td>
+                        ),
+                      )}
+                      <td>{m.os}</td>
+                      <td>{m.network}</td>
+                      <td>{m.ip}</td>
+                      <td>{m.subnet}</td>
+                      <td>{m.gateway}</td>
+                      <td>{m.username}</td>
+                      <td>{statusLabels[m.status]}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="pager">
+              <button
+                disabled={report.page <= 1}
+                onClick={() => setDetailPage((p) => p - 1)}
+              >
+                قبلی
+              </button>
+              <span>
+                صفحه {number(report.page)} از {number(report.pages)}
+              </span>
+              <button
+                disabled={report.page >= report.pages}
+                onClick={() => setDetailPage((p) => p + 1)}
+              >
+                بعدی
+              </button>
+            </div>
+          </section>
+          <section className="panel">
+            <h3>کیفیت تکمیل موجودی</h3>
+            {Object.entries({
+              missing_ip: "IP ثبت‌نشده",
+              missing_subnet: "Subnet ثبت‌نشده",
+              missing_os: "OS ثبت‌نشده",
+              missing_application: "Application ثبت‌نشده",
+              without_disks: "ماشین بدون دیسک",
+              zero_resources: "CPU یا RAM صفر",
+              duplicate_ip_contexts: "گروه IP تکراری در پروژه/محیط/شبکه",
+            }).map(([key, title]) => (
+              <p key={key}>
+                {title}: {number(report.quality[key])}
+              </p>
+            ))}
+          </section>
+          <section className="panel">
+            <h3>فعالیت ۳۰ روز اخیر</h3>
+            {report.activity_30_days.map((row: any, i: number) => (
+              <p key={i}>
+                {row.event} · {row.source}: {number(row.count)}
+              </p>
+            ))}
+            {!report.activity_30_days.length && <p>فعالیتی ثبت نشده است.</p>}
+          </section>
+        </>
+      )}
+      <Exports
+        project={project}
+        projects={projects}
+        run={run}
+        notice={notice}
+      />
+    </section>
+  );
+}

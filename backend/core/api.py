@@ -738,3 +738,17 @@ def updates(request):
             "runs": runs,
         }
     )
+
+
+@api_view(["GET"])
+def management_reports(request):
+    from .reports import management_report
+    project_id = request.query_params.get("project")
+    environment_id = request.query_params.get("environment")
+    project = project_for(request.user, project_id) if project_id else None
+    if environment_id and project is None:
+        raise ValidationError("برای انتخاب محیط، پروژه را انتخاب کنید")
+    environment = get_object_or_404(Environment, pk=environment_id, project=project) if environment_id else None
+    response = Response(management_report(scope(request.user), project, environment, int(request.query_params.get("page", 1))))
+    response["Cache-Control"] = "no-store"
+    return response

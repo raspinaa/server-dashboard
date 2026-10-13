@@ -82,3 +82,11 @@ Reproduce safe checks: `python -m pytest -q`, `bash -n scripts/bootstrap-debian.
 ## Installer permissions follow-up — 2026-10-12
 
 95 MySQL-backed tests passed with opt-in isolated backup/restore. Permission tests cover private modes, intended ownership calls, repeatability, preserved key/database contents, and rejecting symbolic/hard links before mutations. Ownership operations are mocked in safe temporary-directory tests; no host permission changes or production installer execution occurred. Gunicorn configuration accepted umask 0077 (decimal 63). Fresh-server installation and actual cross-container UID access remain deployment-phase checks.
+
+## Management reports and host CLI — 2026-10-13
+
+112 backend/operations tests passed against disposable MySQL 8.4, including opt-in dump/restore. Reports tests verify scoped totals, no disk-join multiplication, no credentials, project/environment isolation, pagination and original-format project XLSX. CLI tests cover dated compressed snapshots, source/image restoration ordering, corrupt archive rejection, unsafe members, recursive destination rejection, preserved backup/maintenance on build failure, restart after backup failure and preservation of unrelated command files. Host commands and GitHub retrieval are mocked in CLI tests; production installer and host updates were not executed.
+
+Frontend type/production build and 3 unit tests passed. 8 browser flows passed on desktop/mobile, including managerial filters and project export. Report screenshots were inspected. Django checks and migration-drift checks passed; no schema migration is needed. Earlier browser setup failed because the isolated development CSRF origin was missing; corrected the local server configuration and reran. A new browser locator initially included decorative navigation icons; those icons now have aria-hidden and all flows passed on rerun.
+
+Unverified integrations: fresh-server CLI registration/venv setup, real private GitHub release/commit access, release publication/signing, actual host image upgrade and full production snapshot restoration. The current signed-release compatibility target remains Ubuntu 24.04; Debian pinned-source updates are implemented, while Debian signed-release compatibility remains a later release integration. Commands and limitations: docs/cli.fa.md.

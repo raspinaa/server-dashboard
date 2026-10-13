@@ -54,7 +54,7 @@ printf 'Plan: signed Docker apt packages, isolated MySQL/Django/React/Caddy cont
 trap 'echo "Stage failed. Existing data/configuration preserved; inspect the error and repeat the same stage." >&2' ERR
 prerequisites() {
  apt-get update
- apt-get install --no-remove -y ca-certificates curl git openssl python3 iproute2 dnsutils
+ apt-get install --no-remove -y ca-certificates curl git openssl python3 python3-venv iproute2 dnsutils
  if ! command -v docker >/dev/null; then
   # Never remove conflicting host packages or replace an administrator-managed Docker source.
   for package in docker.io containerd runc; do
@@ -156,6 +156,7 @@ PY
  bash scripts/compose.sh "$root" run --rm backend python manage.py migrate --noinput
  bash scripts/compose.sh "$root" run --rm -it backend python manage.py bootstrap_admin --username "$admin" --if-missing
  bash scripts/compose.sh "$root" up -d
+ python3 scripts/install_cli.py --root "$root"
  python3 scripts/site_health.py "$root"
 }
 case "$stage" in

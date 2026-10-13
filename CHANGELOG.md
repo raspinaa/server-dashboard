@@ -2,6 +2,9 @@
 
 ## 0.1.0 — Unreleased
 
+- Scoped management reports, resource graphs, service breakdowns and project-selectable XLSX exports.
+- Host CLI for dated full backups, signed release or pinned-commit updates and explicit snapshot restore.
+
 - Remove public demo, its publication workflow and documentation links.
 
 

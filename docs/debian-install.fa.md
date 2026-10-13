@@ -4,7 +4,7 @@
 
 ## چه چیزهایی نصب می‌شوند؟
 
-پیش‌نیازهای میزبان: CA certificates، curl، git، openssl، Python 3، ابزارهای IP و DNS، Docker Engine، Buildx و Compose حداقل 2.24.4. بسته‌های Docker از مخزن رسمی با امضای apt دریافت می‌شوند. Python فقط برای ابزار نصب است؛ Django/Gunicorn، React/Nginx، MySQL 8.4 و Caddy داخل کانتینر اجرا می‌شوند. MySQL، Node، Nginx یا Certbot روی سیستم نصب نمی‌شود. Caddy گواهی را مدیریت می‌کند. DNS داخلی فقط اگر انتخاب کنید کانتینر جداگانه دارد. اسکریپت SSH، resolv.conf و فایروال را تغییر نمی‌دهد.
+پیش‌نیازهای میزبان: CA certificates، curl، git، openssl، Python 3 و venv، ابزارهای IP و DNS، Docker Engine، Buildx و Compose حداقل 2.24.4. بسته‌های Docker از مخزن رسمی با امضای apt دریافت می‌شوند. Python فقط برای ابزار نصب است؛ Django/Gunicorn، React/Nginx، MySQL 8.4 و Caddy داخل کانتینر اجرا می‌شوند. MySQL، Node، Nginx یا Certbot روی سیستم نصب نمی‌شود. Caddy گواهی را مدیریت می‌کند. DNS داخلی فقط اگر انتخاب کنید کانتینر جداگانه دارد. اسکریپت SSH، resolv.conf و فایروال را تغییر نمی‌دهد.
 
 ## دریافت نصب‌کننده
 
@@ -97,3 +97,5 @@ sudo bash scripts/backup.sh "$PWD" /YOUR_PROTECTED_BACKUP_DIRECTORY
 Gunicorn با umask 0077 اجرا می‌شود تا فایل‌های جدید خصوصی بمانند. مالکیت دیتابیس توسط entrypoint رسمی MySQL مدیریت می‌شود؛ نصب‌کننده مالکیت دیتابیس موجود را تغییر نمی‌دهد. symlink، hardlink و فایل ویژه در مسیرهای حساس پیش از تغییر مجوز رد می‌شوند. رمزها و کلیدها جایگزین نمی‌شوند. این سیاست فقط داخل مسیر نصب است؛ سیستم را با chmod عمومی یا دسترسی 777 تغییر نمی‌دهد.
 
 این خودکارسازی دسترسی‌ها بخشی از ایمن‌سازی نصب است. تضمین نبود آسیب‌پذیری برنامه یا تنظیم درست تمام تجهیزات شبکه نیست. SSH و firewall مطابق قرارداد نصب تغییر نمی‌کنند؛ دسترسی عمومی شبکه باید جداگانه توسط مدیر تنظیم شود.
+
+پس از نصب، فرمان‌های `infrahub backup`، `infrahub update` و `infrahub restore` ثبت می‌شوند؛ [راهنمای مدیریت خط فرمان](cli.fa.md) را ببینید.
