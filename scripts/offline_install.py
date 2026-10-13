@@ -25,7 +25,7 @@ def package_files(folder):
 
 
 def supported(os_release, arch):
-    return arch=='x86_64' and ((os_release.get('ID')=='debian' and os_release.get('VERSION_ID') in {'12','13'}) or (os_release.get('ID')=='ubuntu' and os_release.get('VERSION_ID')=='24.04'))
+    return arch=='x86_64' and ((os_release.get('ID')=='debian' and os_release.get('VERSION_ID') in {'12','13'}) or (os_release.get('ID')=='ubuntu' and os_release.get('VERSION_ID') in {'24.04','26.04'}))
 
 
 def existing(root):
@@ -80,7 +80,7 @@ def install_package(folder, key, root, host, tls='local', apply=False, admin='ad
     dc=compose_command(root)
     command(['docker','load','--input',str(root/'deploy/offline/images.tar')])
     command(dc+['config','--quiet'])
-    command(dc+['up','-d','--no-build','--pull','never','db'])
+    command(dc+['up','-d','--no-build','--pull','never','--wait','--wait-timeout','180','db'])
     command(dc+['run','--rm','--no-deps','--pull','never','backend','python','backend/manage.py','migrate','--noinput'])
     command(dc+['run','--rm','--no-deps','--pull','never','-it','backend','python','backend/manage.py','bootstrap_admin','--username',admin,'--if-missing'])
     command(dc+['up','-d','--no-build','--pull','never'])

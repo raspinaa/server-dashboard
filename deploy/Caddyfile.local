@@ -1,6 +1,7 @@
 {
  auto_https disable_redirects
  skip_install_trust
+ default_sni {$SITE_ADDRESS}
 }
 http://{$SITE_ADDRESS} {
  redir https://{$SITE_ADDRESS}:{$HTTPS_PORT}{uri} permanent

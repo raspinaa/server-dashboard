@@ -39,6 +39,9 @@ def harden(root):
     # recursively chmod/chown a live database from an application installer.
     policies = {
         '.env': (0, 0, 0o700, 0o600),
+        # This read-only MySQL configuration contains no credentials and must
+        # remain readable after the entrypoint switches to the mysql UID.
+        'deploy/mysql.cnf': (0, 0, 0o700, 0o644),
         'config': (0, 0, 0o700, 0o600),
         'data/uploads': (APP_UID, APP_GID, 0o700, 0o600),
         'state': (0, APP_GID, 0o750, 0o640),
@@ -51,7 +54,7 @@ def harden(root):
     }
     # Check parent directories too; a symlinked data/ could otherwise redirect a
     # privileged recursive operation outside this installation.
-    for parent in (root, root / 'data'):
+    for parent in (root, root / 'data', root / 'deploy'):
         if parent.is_symlink():
             raise ValueError(f'Symbolic link refused: {parent}')
     reviewed = {name: entries(root / name) for name in policies}
@@ -62,7 +65,7 @@ def harden(root):
     os.chmod(root / 'data', 0o700)
     for name, (uid, gid, directory_mode, file_mode) in policies.items():
         path = root / name
-        if name != '.env' and not path.exists():
+        if name not in {'.env', 'deploy/mysql.cnf'} and not path.exists():
             path.mkdir(parents=True, mode=directory_mode)
             reviewed[name] = [path]
         for item in reviewed[name]:

@@ -23,7 +23,7 @@ def test_supported_debian_versions():
 
 def test_wheel_bundle_covers_host_runtimes(tmp_path):
     commands=wheel_commands(tmp_path,tmp_path/'wheels')
-    assert {c[c.index('--python-version')+1] for c in commands}=={'3.11','3.12','3.13'}
+    assert {c[c.index('--python-version')+1] for c in commands}=={'3.11','3.12','3.13','3.14'}
     assert all('--require-hashes' in c and '--only-binary=:all:' in c for c in commands)
 
 
@@ -118,7 +118,7 @@ def test_bundle_builder_contains_images_wheels_and_signature(tmp_path,monkeypatc
     with tarfile.open(output/metadata['artifact']) as stream:
         names=stream.getnames()
         assert 'deploy/offline/images.tar' in names
-        assert len([name for name in names if name.endswith('.whl')])==3
+        assert len([name for name in names if name.endswith('.whl')])==4
         assert not any(name=='.env' or name.endswith('private.key') for name in names)
     assert (output/'prepare/scripts/prepare-server.sh').exists()
 

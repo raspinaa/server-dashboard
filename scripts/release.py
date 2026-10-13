@@ -28,7 +28,7 @@ def verify(artifact, manifest, signature, public_key, expected_version=None):
         raise ValueError("Version mismatch")
     if (
         data.get("mysql") != "8.4"
-        or not (data.get("os") == "ubuntu-24.04" or set(data.get("platforms", [])) == {"debian-12", "debian-13", "ubuntu-24.04"})
+        or not (data.get("os") == "ubuntu-24.04" or set(data.get("platforms", [])) in ({"debian-12", "debian-13", "ubuntu-24.04"}, {"debian-12", "debian-13", "ubuntu-24.04", "ubuntu-26.04"}))
         or "amd64" not in data.get("architectures", [])
     ):
         raise ValueError("Unsupported compatibility")
@@ -128,7 +128,7 @@ def build(root, output, signing_key):
         "sha256": digest(artifact),
         "mysql": "8.4",
         "os": "linux-offline",
-        "platforms": ["debian-12", "debian-13", "ubuntu-24.04"],
+        "platforms": ["debian-12", "debian-13", "ubuntu-24.04", "ubuntu-26.04"],
         "offline": (root / "deploy/offline/images.tar").is_file() and (root / "deploy/offline/wheels").is_dir(),
         "architectures": ["amd64"],
         "notes": (root / "CHANGELOG.md").read_text()[:30000] if (root / "CHANGELOG.md").exists() else "",

@@ -18,7 +18,7 @@ def run(args):subprocess.run(args,check=True)
 
 def wheel_commands(root, wheels):
     commands=[]
-    for version in ['3.11','3.12','3.13']:
+    for version in ['3.11','3.12','3.13','3.14']:
         commands.append([sys.executable,'-m','pip','download','--only-binary=:all:','--require-hashes','--implementation','cp','--python-version',version,'--abi','cp'+version.replace('.',''),'--platform','manylinux_2_34_x86_64','--platform','manylinux_2_28_x86_64','--platform','manylinux_2_17_x86_64','--platform','manylinux2014_x86_64','--dest',str(wheels),'-r',str(root/'scripts/requirements.cli.lock')])
     return commands
 

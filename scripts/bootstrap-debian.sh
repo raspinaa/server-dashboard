@@ -5,7 +5,7 @@ umask 077
 stage=check apply=0
 usage() {
  cat <<'EOF'
-InfraHub Debian 12/13 amd64 prerequisites (online preparation only)
+InfraHub Debian 12/13 or Ubuntu 24.04/26.04 amd64 prerequisites (online preparation only)
 --stage check|prerequisites --apply
 Application install/update is offline: use infrahub-install or infrahub update PACKAGE.
 EOF
@@ -20,8 +20,8 @@ while (($#)); do
 done
 case "$stage" in check|prerequisites) ;; *) usage; exit 2;; esac
 . /etc/os-release
-[[ "$ID" == debian && "$VERSION_ID" =~ ^(12|13)$ && "$(uname -m)" == x86_64 ]] || { echo 'Supported: Debian 12/13, amd64 only' >&2; exit 1; }
-printf 'System: Debian %s amd64; stage=%s\n' "$VERSION_ID" "$stage"
+[[ "$(uname -m)" == x86_64 && ( ( "$ID" == debian && "$VERSION_ID" =~ ^(12|13)$ ) || ( "$ID" == ubuntu && "$VERSION_ID" =~ ^(24.04|26.04)$ ) ) ]] || { echo 'Supported: Debian 12/13 or Ubuntu 24.04/26.04, amd64 only' >&2; exit 1; }
+printf 'System: %s %s amd64; stage=%s\n' "$ID" "$VERSION_ID" "$stage"
 for cmd in curl git openssl python3 ip ss dig docker; do
  if command -v "$cmd" >/dev/null; then printf 'Available: %s\n' "$cmd"; else printf 'Missing: %s\n' "$cmd"; fi
 done
@@ -48,9 +48,9 @@ prerequisites() {
   done
   install -d -m 0755 /etc/apt/keyrings
   key=/etc/apt/keyrings/infrahub-docker.asc
-  if [[ ! -f "$key" ]]; then curl --fail --proto '=https' --tlsv1.2 https://download.docker.com/linux/debian/gpg -o "$key"; chmod 0644 "$key"; fi
+  if [[ ! -f "$key" ]]; then curl --fail --proto '=https' --tlsv1.2 "https://download.docker.com/linux/$ID/gpg" -o "$key"; chmod 0644 "$key"; fi
   docker_source=/etc/apt/sources.list.d/infrahub-docker.sources
-  expected=$(printf 'Types: deb\nURIs: https://download.docker.com/linux/debian\nSuites: %s\nComponents: stable\nArchitectures: amd64\nSigned-By: %s\n' "$VERSION_CODENAME" "$key")
+  expected=$(printf 'Types: deb\nURIs: https://download.docker.com/linux/%s\nSuites: %s\nComponents: stable\nArchitectures: amd64\nSigned-By: %s\n' "$ID" "$VERSION_CODENAME" "$key")
   if [[ -f "$docker_source" ]]; then [[ "$(cat "$docker_source")" == "$expected" ]] || { echo 'Existing Docker apt configuration differs' >&2; return 1; }
   else printf '%s\n' "$expected" > "$docker_source"; fi
   apt-get update
