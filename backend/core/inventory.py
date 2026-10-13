@@ -10,7 +10,7 @@ from django.db import transaction
 from django.db.models import Sum
 from rest_framework.exceptions import ValidationError
 from .models import Machine, Disk, Application, Environment, Activity, Change
-from .validation import capacity, network_fields
+from .validation import capacity, network_fields, normalize_interfaces
 
 FIELDS = [
     "environment",
@@ -24,6 +24,7 @@ FIELDS = [
     "ip",
     "subnet",
     "gateway",
+    "interfaces",
     "username",
     "status",
     "archived",
@@ -46,6 +47,7 @@ def snapshot(m):
             for k in FIELDS
             if k not in ["environment", "application"]
         },
+        "interfaces": m.interfaces or ([{k: getattr(m, k) for k in ['ip', 'subnet', 'gateway', 'network']}] if m.ip else []),
         "disks": [
             {"id": str(d.id), "name": d.name, "size": str(d.size), "order": d.order}
             for d in m.disks.all()
@@ -61,6 +63,7 @@ def normalize(project, data, existing=None):
     if set(data) - allowed:
         raise ValidationError("فیلد ناشناخته")
     out = dict(data)
+    explicit_interfaces = 'interfaces' in data
     out.pop("version", None)
     if existing:
         old = snapshot(existing)
@@ -99,7 +102,18 @@ def normalize(project, data, existing=None):
         raise ValidationError({"status": "وضعیت نامعتبر"})
     if not isinstance(out["archived"], bool):
         raise ValidationError({"archived": "مقدار بولی لازم است"})
-    warnings = network_fields(out)
+    if explicit_interfaces:
+        out['interfaces'], warnings = normalize_interfaces(out['interfaces'])
+        first = out['interfaces'][0] if out['interfaces'] else dict(ip='', subnet='', gateway='', network=out['network'])
+        out.update(first)
+    else:
+        if 'ip' in data and '/' in str(data['ip']) and 'subnet' not in data:
+            out['subnet'] = ''
+        warnings = network_fields(out)
+        additional = list(out.get('interfaces') or [])[1:]
+        primary = {k: out[k] for k in ['ip', 'subnet', 'gateway', 'network']}
+        out['interfaces'], extra_warnings = normalize_interfaces([primary, *additional])
+        warnings.extend(extra_warnings)
     if (
         out["ip"]
         and Machine.objects.filter(

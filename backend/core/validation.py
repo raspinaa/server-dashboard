@@ -44,7 +44,19 @@ def capacity(value, integer=False):
 def network_fields(data):
     warnings = []
     parsed = {}
+    if data.get('ip') and '/' in str(data['ip']):
+        try:
+            interface = ipaddress.ip_interface(str(data['ip']).strip())
+            prefix = '/' + str(interface.network.prefixlen)
+            if data.get('subnet') and subnet(data['subnet'], interface.version == 6) != prefix:
+                raise ValidationError({'subnet': 'ساب‌نت ستون جدا با مقدار IP یکسان نیست'})
+            data['ip'] = str(interface.ip)
+            data['subnet'] = prefix
+        except ValueError:
+            raise ValidationError({'ip': 'آدرس IP یا پیشوند نامعتبر است'})
     for key in ["ip", "gateway"]:
+        if str(data.get(key) or '').strip() == '0':
+            data[key] = ''
         try:
             parsed[key] = ipaddress.ip_address(data[key]) if data.get(key) else None
         except ValueError:
@@ -69,3 +81,24 @@ def network_fields(data):
         ):
             warnings.append("IP آدرس شبکه یا Broadcast است")
     return warnings
+
+
+def normalize_interfaces(values):
+    if not isinstance(values, list) or len(values) > 64:
+        raise ValidationError({'interfaces': 'حداکثر ۶۴ آدرس شبکه مجاز است'})
+    result, warnings, seen = [], [], set()
+    for raw in values:
+        if not isinstance(raw, dict) or set(raw) - {'ip', 'subnet', 'gateway', 'network'}:
+            raise ValidationError({'interfaces': 'مشخصات شبکه نامعتبر است'})
+        item = {key: str(raw.get(key) or '').strip() for key in ['ip', 'subnet', 'gateway', 'network']}
+        if not any(item.values()):
+            continue
+        if len(item['network']) > 180:
+            raise ValidationError({'network': 'نام شبکه بیش از حد طولانی است'})
+        warnings.extend(network_fields(item))
+        context = (item['network'], item['ip'])
+        if item['ip'] and context in seen:
+            raise ValidationError({'interfaces': 'آدرس IP در همان شبکه برای این سرور تکرار شده است'})
+        seen.add(context)
+        result.append(item)
+    return result, warnings

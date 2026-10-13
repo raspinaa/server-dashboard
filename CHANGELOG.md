@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1
+
+- Automatic XLSX preview and defaults for valid new machines; optional per-row decisions.
+- Multiple IPs and CIDR parsing, repeated section headers and merged environment/service groups.
+- Empty resource values become zero; network addresses can remain empty.
+- Multiple addresses in manual editing and XLSX export; visible header logout and manual machine creation.
+
 ## 0.2.0 — Unreleased
 
 - Offline-only application installation and updates from copied signed packages.

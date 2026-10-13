@@ -89,6 +89,7 @@ class Machine(models.Model):
     ip = models.CharField(max_length=45, blank=True)
     subnet = models.CharField(max_length=4, blank=True)
     gateway = models.CharField(max_length=45, blank=True)
+    interfaces = models.JSONField(default=list, blank=True)
     username = models.CharField(max_length=180, blank=True)
     status = models.CharField(
         max_length=20,

@@ -76,18 +76,16 @@ test("create project, mapped XLSX import, resources and scoped viewer access", a
     .getByLabel("فایل XLSX")
     .setInputFiles("../templates/infrahub-template.xlsx");
   await page.getByRole("button", { name: "بارگذاری", exact: true }).click();
-  await page.getByRole("button", { name: "اعتبارسنجی و پیش‌نمایش" }).click();
+  await expect(
+    page.getByText("4 ردیف آماده ورود است.", { exact: false }),
+  ).toBeVisible();
   await expect(
     page.getByRole("combobox", { name: "عمل", exact: true }),
-  ).toHaveCount(4);
+  ).toHaveCount(0);
   await page.screenshot({
     path: `../docs/screenshots/import-${testInfo.project.name}.png`,
     fullPage: true,
   });
-  for (const action of await page
-    .getByRole("combobox", { name: "عمل", exact: true })
-    .all())
-    await action.selectOption("apply");
   await page.getByRole("button", { name: "تأیید و اعمال تراکنشی" }).click();
   await expect(
     page.getByRole("status").filter({ hasText: "ورود کامل شد: 4 افزوده" }),
@@ -137,7 +135,7 @@ test("create project, mapped XLSX import, resources and scoped viewer access", a
     }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "＋ ماشین جدید", exact: true }),
+    page.getByRole("button", { name: "افزودن دستی ماشین", exact: true }),
   ).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "کاربران و دسترسی" }),

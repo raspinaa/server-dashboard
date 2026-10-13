@@ -30,7 +30,7 @@ from .models import (
 )
 from .inventory import snapshot, save_machine
 from .security import encrypt, decrypt, require, audit
-from .validation import capacity, network_fields
+from .validation import capacity, network_fields, normalize_interfaces
 
 LABELS = {
     "Row": "row",
@@ -98,18 +98,28 @@ def batch_workbook(batch):
     return load_safe(raw)
 
 
+def header_mapping(row):
+    mapping = {}
+    aliases = {key.casefold(): value for key, value in LABELS.items()}
+    for cell in row:
+        label = str(cell.value or '').strip()
+        base = re.sub(r'\s+\d+$', '', label).casefold()
+        if base in aliases:
+            mapping[str(cell.column)] = aliases[base]
+        elif re.fullmatch(r'(?:hdd|disk)(?:\s+\d+)?(?:\s*\(gb\))?', label, re.I):
+            mapping[str(cell.column)] = 'disk'
+        elif re.fullmatch(r'(?:ip|ip address|server ip)(?:\s+\d+)?', label, re.I):
+            mapping[str(cell.column)] = 'ip'
+    return mapping
+
+
 def detect(ws):
     best = (0, 1, {})
     for row in ws.iter_rows(min_row=1, max_row=min(30, ws.max_row)):
-        mapping = {}
-        for c in row:
-            label = str(c.value or "").strip()
-            if label in LABELS:
-                mapping[str(c.column)] = LABELS[label]
-            elif re.match(
-                r"^(?:HDD(?: \d+)?(?: \(GB\))?|Disk \d+(?: \(GB\))?)$", label, re.I
-            ):
-                mapping[str(c.column)] = "disk"
+        mapping = header_mapping(row)
+        if {'environment', 'server_name'}.issubset(mapping.values()) and len(mapping) >= 3:
+            best = (len(mapping), row[0].row, mapping)
+            break
         if len(mapping) > best[0]:
             best = (len(mapping), row[0].row, mapping)
     return {
@@ -150,31 +160,35 @@ def preview(batch, worksheet, mapping, header_row, mode):
     for c, f in mapping.items():
         if not str(c).isdigit() or not 1 <= int(c) <= 150 or f not in VALID_FIELDS:
             raise ValidationError("نگاشت نامعتبر")
-    singles = [f for f in mapping.values() if f not in ["disk", "ignore"]]
+    singles = [f for f in mapping.values() if f not in ['disk', 'ignore', 'ip', 'subnet', 'gateway', 'network']]
     if len(set(singles)) != len(singles) or not {"environment", "server_name"}.issubset(
         singles
     ):
         raise ValidationError("ستون‌های محیط و نام سرور باید یک‌بار نگاشت شوند")
+    original_mapping = dict(mapping)
     ws = wb[worksheet]
     merged = {}
     for area in ws.merged_cells.ranges:
-        field = mapping.get(str(area.min_col))
-        if field in ["environment", "application"]:
-            for r in range(area.min_row, area.max_row + 1):
-                merged[(r, area.min_col)] = ws.cell(area.min_row, area.min_col).value
+        for r in range(area.min_row, area.max_row + 1):
+            merged[(r, area.min_col)] = ws.cell(area.min_row, area.min_col).value
     rows = []
     issues = []
     seen = set()
     ips = set()
     for r in range(int(header_row) + 1, ws.max_row + 1):
+        section_mapping = header_mapping(ws[r])
+        if {'environment', 'server_name'}.issubset(section_mapping.values()) and len(section_mapping) >= 3:
+            mapping = section_mapping
+            continue
         values = {}
+        network_columns = {key: [] for key in ['ip', 'subnet', 'gateway', 'network']}
         disks = []
         errors = []
         for c, f in sorted(mapping.items(), key=lambda x: int(x[0])):
             if f == "ignore":
                 continue
             cell = ws.cell(r, int(c))
-            v = merged.get((r, int(c)), cell.value)
+            v = merged.get((r, int(c)), cell.value) if f in ['environment', 'application'] else cell.value
             # Export escapes text beginning with formula markers. UUID-bearing round trips decode that text only.
             if (
                 wb.properties.identifier == "InfraHub-escaped-text-v1"
@@ -198,8 +212,19 @@ def preview(batch, worksheet, mapping, header_row, mode):
                         )
                 except ValidationError:
                     errors.append("ظرفیت دیسک نامعتبر")
+            elif f in network_columns:
+                network_columns[f].append(str(v or '').strip())
             else:
                 values[f] = str(v or "").strip()
+        raw_interfaces = []
+        addresses = [(i, part) for i, value in enumerate(network_columns['ip']) for part in re.split(r'[\s,;،]+', value) if part] or [(0, '')]
+        for i, address in addresses:
+            item = {'ip': address}
+            for key in ['subnet', 'gateway', 'network']:
+                columns = network_columns[key]
+                item[key] = columns[i] if i < len(columns) else columns[0] if len(columns) == 1 else ''
+            raw_interfaces.append(item)
+        values.update(raw_interfaces[0])
         if not values.get("server_name") and not any(
             values.get(k)
             for k in ["vms", "ip", "cpu", "ram", "os", "username", "password"]
@@ -214,7 +239,9 @@ def preview(batch, worksheet, mapping, header_row, mode):
                 raise ValidationError("نام سرور و محیط الزامی است")
             values["cpu"] = capacity(values.get("cpu"), True)
             values["ram"] = capacity(values.get("ram"))
-            warnings = network_fields(values)
+            values['interfaces'], warnings = normalize_interfaces(raw_interfaces)
+            if values['interfaces']:
+                values.update(values['interfaces'][0])
             context = (
                 values.get("environment"),
                 values.get("network", ""),
@@ -342,7 +369,7 @@ def preview(batch, worksheet, mapping, header_row, mode):
     if not rows:
         issues.append({"row": None, "errors": ["هیچ ماشین قابل ورود یافت نشد"]})
     batch.worksheet = worksheet
-    batch.mappings = {"columns": mapping, "header_row": int(header_row)}
+    batch.mappings = {"columns": original_mapping, "header_row": int(header_row)}
     batch.mode = mode
     batch.preview = rows
     batch.issues = issues
@@ -622,6 +649,13 @@ def export_inventory(project, environment=None, credentials=False, merged=True):
             i + 1: ("disk" if l == "HDD (GB)" else LABELS.get(l, "ignore"))
             for i, l in enumerate(labels)
         }
+    network_count = max([len(snapshot(m)['interfaces']) for m in machines] + [1])
+    for key, label in [('network', 'Network'), ('ip', 'Server IP Addr'), ('subnet', 'Subnet (CIDR)'), ('gateway', 'GW IP Addr')]:
+        count = sum(f == key for f in mapping.values())
+        for i in range(count, network_count):
+            column = max(mapping) + 1
+            mapping[column] = key
+            ws.cell(header, column, label + (' ' + str(i + 1) if i else ''))
     env_start = app_start = header + 1
     previous_env = previous_app = None
     index = 0
@@ -647,6 +681,7 @@ def export_inventory(project, environment=None, credentials=False, merged=True):
         s = snapshot(m)
         disks = s["disks"]
         disk_i = 0
+        network_indices = {key: 0 for key in ['ip', 'subnet', 'gateway', 'network']}
         values = {
             **s,
             "row": index,
@@ -659,8 +694,14 @@ def export_inventory(project, environment=None, credentials=False, merged=True):
         }
         for c, f in sorted(mapping.items()):
             if f == "disk":
-                value = float(disks[disk_i]["size"]) if disk_i < len(disks) else None
+                value = float(disks[disk_i]["size"]) if disk_i < len(disks) else 0
                 disk_i += 1
+            elif f in network_indices:
+                i = network_indices[f]
+                value = s['interfaces'][i].get(f, '') if i < len(s['interfaces']) else ''
+                if f == 'ip' and value:
+                    value += s['interfaces'][i].get('subnet', '')
+                network_indices[f] += 1
             elif f == "ignore":
                 value = None
             else:

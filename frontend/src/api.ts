@@ -89,6 +89,7 @@ export const fields: Record<string, string> = {
   ip: "Server IP Addr",
   subnet: "Subnet (CIDR)",
   gateway: "GW IP Addr",
+  interfaces: "آدرس‌های شبکه",
   username: "Username",
   status: "وضعیت",
   archived: "بایگانی",

@@ -15,6 +15,7 @@ import {
   time,
 } from "./api";
 import "./style.css";
+import { defaultImportDecision } from "./imports";
 type Env = { id: number; name: string; archived: boolean; version: number };
 type Project = {
   id: number;
@@ -28,6 +29,12 @@ type Project = {
   environments: Env[];
 };
 type Disk = { id?: string; name: string; size: string; order: number };
+type NetworkInterface = {
+  ip: string;
+  subnet: string;
+  gateway: string;
+  network: string;
+};
 type Machine = {
   id: string;
   version: number;
@@ -43,6 +50,7 @@ type Machine = {
   ip: string;
   subnet: string;
   gateway: string;
+  interfaces: NetworkInterface[];
   username: string;
   status: string;
   disks: Disk[];
@@ -225,20 +233,6 @@ function App() {
         <div className="asidebottom">
           <strong>{user.first_name || user.username}</strong>
           <small>جلسه محلی · دسترسی پروژه‌ای</small>
-          <button
-            onClick={() =>
-              run(async () => {
-                sessionGeneration.current++;
-                await api("logout/", "POST");
-                setUser(null);
-                setProjects([]);
-                setPid(0);
-                setSection("inventory");
-              })
-            }
-          >
-            خروج از حساب
-          </button>
         </div>
       </aside>
       <div className="workspace">
@@ -250,6 +244,23 @@ function App() {
             <h1>{nav.find((n) => n[0] === section)?.[1]}</h1>
           </div>
           <div className="toolbar">
+            <button
+              className="ghost"
+              aria-label="خروج از حساب"
+              onClick={() => {
+                if (!navigate()) return;
+                run(async () => {
+                  sessionGeneration.current++;
+                  await api("logout/", "POST");
+                  setUser(null);
+                  setProjects([]);
+                  setPid(0);
+                  setSection("inventory");
+                });
+              }}
+            >
+              خروج
+            </button>
             <label className="compact">
               پروژه
               <select
@@ -748,7 +759,7 @@ function Inventory({
             />
             {canEdit && (
               <button onClick={() => setCreating(!creating)}>
-                ＋ ماشین جدید
+                افزودن دستی ماشین
               </button>
             )}
           </div>
@@ -829,7 +840,7 @@ function Inventory({
                       <td>{m.ram}</td>
                       {Array.from({ length: max }, (_, d) => (
                         <td key={d} title={m.disks[d]?.name}>
-                          {m.disks[d]?.size || "—"}
+                          {m.disks[d]?.size || "0"}
                         </td>
                       ))}
                       {[
@@ -841,7 +852,14 @@ function Inventory({
                         "username",
                       ].map((k) => (
                         <td dir="ltr" key={k}>
-                          {String(m[k as keyof Machine] || "—")}
+                          {["network", "ip", "subnet", "gateway"].includes(k) &&
+                          m.interfaces?.length
+                            ? m.interfaces.map((address, i) => (
+                                <div key={i}>
+                                  {address[k as keyof NetworkInterface] || "—"}
+                                </div>
+                              ))
+                            : String(m[k as keyof Machine] || "—")}
                         </td>
                       ))}
                       <td>
@@ -913,6 +931,22 @@ function MachineEditor({
   run: Run;
   done: () => Promise<void>;
 }) {
+  const [newEnvironment, setNewEnvironment] = useState(
+    !project.environments.some((e) => !e.archived) &&
+      project.role === "manager",
+  );
+  const [interfaces, setInterfaces] = useState<NetworkInterface[]>(
+    machine?.interfaces?.length
+      ? machine.interfaces.map((x) => ({ ...x }))
+      : [
+          {
+            ip: machine?.ip || "",
+            subnet: machine?.subnet || "",
+            gateway: machine?.gateway || "",
+            network: machine?.network || "",
+          },
+        ],
+  );
   const [disks, setDisks] = useState<Disk[]>(
       machine?.disks.map((d) => ({ ...d })) || [],
     ),
@@ -942,7 +976,7 @@ function MachineEditor({
       ["server_name", "environment", "application", "vms", "os"],
     ],
     ["منابع تخصیص‌یافته", ["cpu", "ram"]],
-    ["شبکه", ["network", "ip", "subnet", "gateway", "username"]],
+    ["حساب سیستم", ["username"]],
     ["گردش کار", ["status", "archived"]],
   ] as const;
   return (
@@ -952,13 +986,28 @@ function MachineEditor({
       onSubmit={(e) => {
         e.preventDefault();
         const data: any = Object.fromEntries(new FormData(e.currentTarget));
+        const requestedNewEnvironment = data.environment === "new";
+        const newEnvironmentName = String(data.new_environment || "").trim();
+        delete data.new_environment;
         data.cpu = Number(data.cpu);
         data.environment = Number(data.environment);
         data.archived = data.archived === "on";
         data.version = machine?.version;
         data.disks = disks.map((d, i) => ({ ...d, order: i }));
+        data.interfaces = interfaces;
         run(async () => {
           try {
+            if (requestedNewEnvironment) {
+              const existing = project.environments.find(
+                (env) => !env.archived && env.name === newEnvironmentName,
+              );
+              const created =
+                existing ||
+                (await api<Env>(`projects/${project.id}/environments/`, "POST", {
+                  name: newEnvironmentName,
+                }));
+              data.environment = created.id;
+            }
             const r = await api(
               machine
                 ? `machines/${machine.id}/`
@@ -986,13 +1035,20 @@ function MachineEditor({
                 {k === "environment" ? (
                   <select
                     name={k}
+                    onChange={(e) =>
+                      setNewEnvironment(e.target.value === "new")
+                    }
                     defaultValue={
                       machine?.environment ||
-                      project.environments.find((e) => !e.archived)?.id
+                      project.environments.find((e) => !e.archived)?.id ||
+                      (project.role === "manager" ? "new" : "")
                     }
                     required
                   >
                     <option value="">انتخاب محیط</option>
+                    {project.role === "manager" && (
+                      <option value="new">محیط جدید</option>
+                    )}
                     {project.environments
                       .filter((e) => !e.archived)
                       .map((e) => (
@@ -1032,6 +1088,76 @@ function MachineEditor({
           </div>
         </fieldset>
       ))}
+      {newEnvironment && (
+        <label>
+          نام محیط جدید
+          <input
+            name="new_environment"
+            required
+            maxLength={120}
+            placeholder="مثلاً Test یا Production"
+          />
+        </label>
+      )}
+      <fieldset>
+        <legend>آدرس‌های شبکه</legend>
+        <p className="muted">
+          هر IP جداست؛ مثلاً 192.0.2.10/24. پیشوند داخل IP خودکار تشخیص داده
+          می‌شود.
+        </p>
+        {interfaces.map((address, i) => (
+          <div className="formgrid" key={i}>
+            {(["network", "ip", "subnet", "gateway"] as const).map((key) => (
+              <label key={key}>
+                {fields[key]}
+                {i ? ` ${i + 1}` : ""}
+                <input
+                  dir="ltr"
+                  value={address[key]}
+                  onChange={(e) =>
+                    setInterfaces(
+                      interfaces.map((item, n) =>
+                        n === i
+                          ? {
+                              ...item,
+                              [key]: e.target.value,
+                              ...(key === "ip" && e.target.value.includes("/")
+                                ? { subnet: "" }
+                                : {}),
+                            }
+                          : item,
+                      ),
+                    )
+                  }
+                />
+              </label>
+            ))}
+            <button
+              type="button"
+              className="danger"
+              onClick={() => {
+                setInterfaces(interfaces.filter((_, n) => n !== i));
+                setDirty(true);
+              }}
+            >
+              حذف IP
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          className="ghost"
+          onClick={() => {
+            setInterfaces([
+              ...interfaces,
+              { ip: "", subnet: "", gateway: "", network: "" },
+            ]);
+            setDirty(true);
+          }}
+        >
+          ＋ IP دیگر
+        </button>
+      </fieldset>
       <fieldset>
         <legend>دیسک‌ها · هر دیسک مستقل</legend>
         {disks.map((d, i) => (
@@ -1565,6 +1691,7 @@ function Imports({
     if (project.role === "manager") run(load);
   }, [project.id]);
   const selectSheet = (b: any, name: string) => {
+    setRows([]);
     setSheet(name);
     const s = b.sheets.find((s: any) => s.name === name);
     setMapping(s.mapping);
@@ -1572,6 +1699,32 @@ function Imports({
   };
   const patch = (r: any, value: any) =>
     setDecisions((d) => ({ ...d, [r.row]: { ...d[r.row], ...value } }));
+  const prepare = async (
+    b: any,
+    selected: string,
+    columns: Record<string, string>,
+    titleRow: number,
+  ) => {
+    const result = await api(`imports/${b.id}/`, "POST", {
+      action: "preview",
+      worksheet: selected,
+      mapping: columns,
+      header_row: titleRow,
+      mode,
+      version: b.version,
+    });
+    setBatch({ ...b, ...result });
+    setRows(result.rows);
+    setDecisions(
+      Object.fromEntries(
+        result.rows.map((row: any) => [
+          row.row,
+          defaultImportDecision(row, mode),
+        ]),
+      ),
+    );
+    await load();
+  };
   if (project.role !== "manager")
     return (
       <div className="empty">ورود Excel به مجوز مدیر پروژه نیاز دارد.</div>
@@ -1581,7 +1734,8 @@ function Imports({
       <section className="panel">
         <h2>مرکز ورود Excel</h2>
         <p>
-          انتخاب فایل ← نگاشت ستون‌ها ← اعتبارسنجی ← تصمیم صریح ← ورود تراکنشی
+          فایل را انتخاب کنید؛ ستون‌ها و بخش‌ها خودکار شناسایی می‌شوند.
+          پیش‌نمایش را بررسی و یک‌بار تأیید کنید.
         </p>
         <p className="muted">
           XLSX، حداکثر ۱۰٬۰۰۰ ردیف؛ فرمول و ماکرو پذیرفته نمی‌شود. فایل اصلی
@@ -1598,7 +1752,13 @@ function Imports({
               selectSheet(b, b.sheets[0].name);
               setRows([]);
               setDecisions({});
-              await load();
+              const selected = b.sheets[0];
+              await prepare(
+                b,
+                selected.name,
+                selected.mapping,
+                selected.header_row,
+              );
             });
           }}
         >
@@ -1612,7 +1772,8 @@ function Imports({
           <button disabled={project.archived}>بارگذاری</button>
         </form>
         {batch && (
-          <>
+          <details>
+            <summary>تنظیمات فایل و ستون‌ها (اختیاری)</summary>
             <div className="formgrid">
               <label>
                 Worksheet
@@ -1632,18 +1793,27 @@ function Imports({
                   min={1}
                   max={30}
                   value={header}
-                  onChange={(e) => setHeader(Number(e.target.value))}
+                  onChange={(e) => {
+                    setHeader(Number(e.target.value));
+                    setRows([]);
+                  }}
                 />
               </label>
               <label>
                 حالت
-                <select value={mode} onChange={(e) => setMode(e.target.value)}>
+                <select
+                  value={mode}
+                  onChange={(e) => {
+                    setMode(e.target.value);
+                    setRows([]);
+                  }}
+                >
                   <option value="add_only">فقط افزودن</option>
                   <option value="add_update">افزودن و به‌روزرسانی</option>
                 </select>
               </label>
             </div>
-            <details open>
+            <details>
               <summary>بررسی / اصلاح نگاشت ستون‌ها</summary>
               <div className="mappinggrid">
                 {batch.sheets
@@ -1653,12 +1823,13 @@ function Imports({
                       ستون {i + 1}: {h || "(خالی)"}
                       <select
                         value={mapping[String(i + 1)] || "ignore"}
-                        onChange={(e) =>
+                        onChange={(e) => (
+                          setRows([]),
                           setMapping({
                             ...mapping,
                             [String(i + 1)]: e.target.value,
                           })
-                        }
+                        )}
                       >
                         {[
                           "ignore",
@@ -1700,46 +1871,19 @@ function Imports({
               </div>
             </details>
             <button
-              onClick={() =>
-                run(async () => {
-                  const b = await api(`imports/${batch.id}/`, "POST", {
-                    action: "preview",
-                    worksheet: sheet,
-                    mapping,
-                    header_row: header,
-                    mode,
-                    version: batch.version,
-                  });
-                  setBatch({ ...batch, ...b });
-                  setRows(b.rows);
-                  setDecisions(
-                    Object.fromEntries(
-                      b.rows.map((r: any) => [
-                        r.row,
-                        {
-                          action: "skip",
-                          fields: "web",
-                          disks: "preserve",
-                          credential: "preserve",
-                          match: "",
-                        },
-                      ]),
-                    ),
-                  );
-                  await load();
-                })
-              }
+              onClick={() => run(() => prepare(batch, sheet, mapping, header))}
             >
               اعتبارسنجی و پیش‌نمایش
             </button>
-          </>
+          </details>
         )}
         {rows.length > 0 && (
           <>
             <h3>پیش‌نمایش و تصمیم‌ها</h3>
             <p>
-              هر ردیف ابتدا «رد کردن» است. برای تغییر رکورد موجود، تطبیق و سیاست
-              فیلدها و دیسک‌ها را صریح انتخاب کنید.
+              {rows.filter((r) => decisions[r.row]?.action === "apply").length}{" "}
+              ردیف آماده ورود است. ردیف‌های جدید خودکار انتخاب می‌شوند؛ تطبیق با
+              رکورد موجود و خطاها نیازمند بررسی‌اند.
             </p>
             {rows.map((r) => (
               <article className="previewrow" key={r.row}>
@@ -1775,120 +1919,128 @@ function Imports({
                     )}
                   </pre>
                 </details>
-                <div className="formgrid">
-                  <label>
-                    عمل
-                    <select
-                      value={decisions[r.row]?.action}
-                      onChange={(e) => patch(r, { action: e.target.value })}
-                    >
-                      <option value="skip">رد کردن</option>
-                      <option value="apply">اعمال Excel</option>
-                    </select>
-                  </label>
-                  {r.candidates.length > 0 && (
+                <details>
+                  <summary>
+                    تغییر تصمیم این ردیف ·{" "}
+                    {decisions[r.row]?.action === "apply"
+                      ? "آماده ورود"
+                      : "رد می‌شود"}
+                  </summary>
+                  <div className="formgrid">
                     <label>
-                      تطبیق صریح
+                      عمل
                       <select
-                        value={decisions[r.row]?.match}
-                        onChange={(e) => patch(r, { match: e.target.value })}
+                        value={decisions[r.row]?.action}
+                        onChange={(e) => patch(r, { action: e.target.value })}
                       >
-                        <option value="">انتخاب الزامی</option>
-                        <option value="new">ماشین جدید مستقل</option>
-                        {r.candidates.map((c: any) => (
-                          <option key={c.id} value={c.id}>
-                            {c.server_name} · {c.ip} · {c.id}
-                          </option>
-                        ))}
+                        <option value="skip">رد کردن</option>
+                        <option value="apply">اعمال Excel</option>
                       </select>
                     </label>
-                  )}
-                  <label>
-                    تصمیم فیلدها
-                    <select
-                      value={
-                        typeof decisions[r.row]?.fields === "object"
-                          ? "custom"
-                          : decisions[r.row]?.fields
-                      }
-                      onChange={(e) =>
-                        patch(r, {
-                          fields:
-                            e.target.value === "custom"
-                              ? Object.fromEntries(
-                                  Object.keys(r.data)
-                                    .filter((k) => k !== "disks")
-                                    .map((k) => [k, "web"]),
-                                )
-                              : e.target.value,
-                        })
-                      }
-                    >
-                      <option value="web">حفظ مقدار وب</option>
-                      <option value="excel">اعمال مقدار Excel</option>
-                      <option value="custom">تصمیم به تفکیک فیلد</option>
-                    </select>
-                  </label>
-                  <label>
-                    دیسک‌ها
-                    <select
-                      value={decisions[r.row]?.disks}
-                      onChange={(e) => patch(r, { disks: e.target.value })}
-                    >
-                      <option value="preserve">حفظ همه دیسک‌های وب</option>
-                      <option value="merge">
-                        اعمال ورودی و حفظ دیسک‌های اضافه
-                      </option>
-                      <option value="replace">
-                        جایگزینی کامل؛ حذف دیسک‌های غایب
-                      </option>
-                    </select>
-                  </label>
-                  {r.credential_present && (
+                    {r.candidates.length > 0 && (
+                      <label>
+                        تطبیق صریح
+                        <select
+                          value={decisions[r.row]?.match}
+                          onChange={(e) => patch(r, { match: e.target.value })}
+                        >
+                          <option value="">انتخاب الزامی</option>
+                          <option value="new">ماشین جدید مستقل</option>
+                          {r.candidates.map((c: any) => (
+                            <option key={c.id} value={c.id}>
+                              {c.server_name} · {c.ip} · {c.id}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
                     <label>
-                      اعتبارنامه
+                      تصمیم فیلدها
                       <select
-                        value={decisions[r.row]?.credential}
+                        value={
+                          typeof decisions[r.row]?.fields === "object"
+                            ? "custom"
+                            : decisions[r.row]?.fields
+                        }
                         onChange={(e) =>
-                          patch(r, { credential: e.target.value })
+                          patch(r, {
+                            fields:
+                              e.target.value === "custom"
+                                ? Object.fromEntries(
+                                    Object.keys(r.data)
+                                      .filter((k) => k !== "disks")
+                                      .map((k) => [k, "web"]),
+                                  )
+                                : e.target.value,
+                          })
                         }
                       >
-                        <option value="preserve">حفظ اعتبارنامه فعلی</option>
-                        <option
-                          value="apply"
-                          disabled={
-                            !project.permissions.includes("credential_edit")
-                          }
-                        >
-                          اعمال با مجوز مستقل
+                        <option value="web">حفظ مقدار وب</option>
+                        <option value="excel">اعمال مقدار Excel</option>
+                        <option value="custom">تصمیم به تفکیک فیلد</option>
+                      </select>
+                    </label>
+                    <label>
+                      دیسک‌ها
+                      <select
+                        value={decisions[r.row]?.disks}
+                        onChange={(e) => patch(r, { disks: e.target.value })}
+                      >
+                        <option value="preserve">حفظ همه دیسک‌های وب</option>
+                        <option value="merge">
+                          اعمال ورودی و حفظ دیسک‌های اضافه
+                        </option>
+                        <option value="replace">
+                          جایگزینی کامل؛ حذف دیسک‌های غایب
                         </option>
                       </select>
                     </label>
-                  )}
-                </div>
-                {typeof decisions[r.row]?.fields === "object" && (
-                  <div className="mappinggrid">
-                    {Object.entries(decisions[r.row].fields).map(([k, v]) => (
-                      <label key={k}>
-                        {fields[k] || k}
+                    {r.credential_present && (
+                      <label>
+                        اعتبارنامه
                         <select
-                          value={String(v)}
+                          value={decisions[r.row]?.credential}
                           onChange={(e) =>
-                            patch(r, {
-                              fields: {
-                                ...decisions[r.row].fields,
-                                [k]: e.target.value,
-                              },
-                            })
+                            patch(r, { credential: e.target.value })
                           }
                         >
-                          <option value="web">حفظ وب</option>
-                          <option value="excel">اعمال Excel</option>
+                          <option value="preserve">حفظ اعتبارنامه فعلی</option>
+                          <option
+                            value="apply"
+                            disabled={
+                              !project.permissions.includes("credential_edit")
+                            }
+                          >
+                            اعمال با مجوز مستقل
+                          </option>
                         </select>
                       </label>
-                    ))}
+                    )}
                   </div>
-                )}
+                  {typeof decisions[r.row]?.fields === "object" && (
+                    <div className="mappinggrid">
+                      {Object.entries(decisions[r.row].fields).map(([k, v]) => (
+                        <label key={k}>
+                          {fields[k] || k}
+                          <select
+                            value={String(v)}
+                            onChange={(e) =>
+                              patch(r, {
+                                fields: {
+                                  ...decisions[r.row].fields,
+                                  [k]: e.target.value,
+                                },
+                              })
+                            }
+                          >
+                            <option value="web">حفظ وب</option>
+                            <option value="excel">اعمال Excel</option>
+                          </select>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </details>
               </article>
             ))}
             <button
@@ -2478,8 +2630,8 @@ function Settings({
             </span>
           </div>
           <p>
-            فقط بسته آفلاین کپی‌شده و امضاشده؛ اجرا توسط سرویس مستقل محدود، خارج از
-            درخواست وب.
+            فقط بسته آفلاین کپی‌شده و امضاشده؛ اجرا توسط سرویس مستقل محدود، خارج
+            از درخواست وب.
           </p>
           <button
             onClick={() =>
