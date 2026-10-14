@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0
+
+- Global infrastructure landing dashboard and scoped project/VM navigation.
+- Shared Persian RTL design system, bundled Vazirmatn font and account menu.
+- Server-side inventory sorting, environment grouping and 30/50/100-row pagination.
+- Collapsible project/user forms and categorized reports/import history/audit views.
+- Signed ZIP upload with bounded validation and constrained host staging/upgrade worker.
+- Field-change audit details and searchable, indexed event pagination.
+
 ## 0.2.1
 
 - Automatic XLSX preview and defaults for valid new machines; optional per-row decisions.

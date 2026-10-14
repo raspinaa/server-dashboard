@@ -22,6 +22,8 @@ urlpatterns = [
     path("api/imports/<uuid:pk>/", api.import_detail),
     path("api/users/", api.users),
     path("api/audit/", api.audit_events),
+    path('api/audit/<int:pk>/', api.audit_detail),
     path("api/settings/", api.system_settings),
     path("api/updates/", api.updates),
+    path('api/updates/upload/', api.update_upload),
 ]

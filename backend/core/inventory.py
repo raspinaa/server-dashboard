@@ -11,6 +11,7 @@ from django.db.models import Sum
 from rest_framework.exceptions import ValidationError
 from .models import Machine, Disk, Application, Environment, Activity, Change
 from .validation import capacity, network_fields, normalize_interfaces
+from .security import audit
 
 FIELDS = [
     "environment",
@@ -228,14 +229,19 @@ def save_machine(user, project, data, machine=None, source="web"):
         source=source,
     )
     after = snapshot(machine)
+    changed = []
     for k in FIELDS + ["disks"]:
         if not before or before[k] != after[k]:
+            changed.append(k)
             Change.objects.create(
                 activity=activity,
                 field=k,
                 previous=before[k] if before else None,
                 value=after[k],
             )
+    audit(user, 'machine_updated' if before else 'machine_created', machine.id,
+          project=project.id, server_name=machine.server_name, source=source,
+          activity=activity.id, fields=changed)
     return machine, warnings
 
 

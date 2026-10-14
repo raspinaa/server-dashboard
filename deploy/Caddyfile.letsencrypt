@@ -11,10 +11,16 @@ http://{$SITE_ADDRESS} {
    email {$ACME_EMAIL}
   }
  }
- request_body {
-  max_size {$UPLOAD_LIMIT_MB}MB
+ handle /api/updates/upload/ {
+  request_body {
+   max_size 2048MB
+  }
+  reverse_proxy backend:8000
  }
  handle /api/* {
+  request_body {
+   max_size {$UPLOAD_LIMIT_MB}MB
+  }
   reverse_proxy backend:8000
  }
  handle {

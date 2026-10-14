@@ -13,6 +13,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.files.base import ContentFile
 from django.db import transaction, IntegrityError
+from django.db.models import Q, OuterRef, Subquery
 from django.http import JsonResponse, HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -144,6 +145,7 @@ def login_view(request):
         if not user:
             attempt.failures += 1
             attempt.save()
+            audit(None, 'login_failed', username, username=username)
             return JsonResponse({"detail": "نام کاربری یا رمز نادرست است"}, status=401)
         attempt.delete()
     login(request, user)
@@ -293,14 +295,32 @@ def machines(request, pk):
         q = q.filter(server_name__icontains=request.query_params["search"][:180])
     # Bounded pages protect large inventories; frontend follows pages.
     page = max(1, int(request.query_params.get("page", "1")))
+    page_size = int(request.query_params.get('page_size', '30'))
+    if page_size not in [30, 50, 100]:
+        raise ValidationError('اندازه صفحه نامعتبر است')
+    sort = request.query_params.get('sort', 'server_name')
+    direction = request.query_params.get('direction', 'asc')
+    allowed = {'environment': 'environment__name', 'application': 'application__name',
+               **{key: key for key in ['server_name', 'vms', 'cpu', 'ram', 'os', 'network', 'ip', 'subnet', 'gateway', 'username', 'status']}}
+    if sort.startswith('disk_') and sort[5:].isdigit() and 0 <= int(sort[5:]) < 64:
+        disk = Disk.objects.filter(machine_id=OuterRef('pk')).order_by('order', 'id').values('size')[int(sort[5:]):int(sort[5:]) + 1]
+        q = q.annotate(selected_disk=Subquery(disk))
+        allowed[sort] = 'selected_disk'
+    if sort not in allowed or direction not in ['asc', 'desc']:
+        raise ValidationError('مرتب‌سازی نامعتبر است')
+    order = ('-' if direction == 'desc' else '') + allowed[sort]
+    ordering = [order, 'server_name', 'id'] if request.query_params.get('environment') or sort == 'environment' else ['environment__name', order, 'server_name', 'id']
     total = q.count()
+    audit(request.user, "inventory_viewed", p.id, environment=request.query_params.get("environment", ""), page=page, sort=sort, direction=direction)
     return Response(
         {
             "results": [
                 snapshot(m)
-                for m in q.order_by("server_name", "id")[(page - 1) * 100 : page * 100]
+                for m in q.order_by(*ordering)[(page - 1) * page_size : page * page_size]
             ],
             "count": total,
+            'page_size': page_size,
+            'pages': max(1, (total + page_size - 1) // page_size),
             "page": page,
         }
     )
@@ -339,9 +359,10 @@ def activity(request, pk):
         comment = str(request.data.get("comment", "")).strip()
         if not comment or len(comment) > 10000:
             raise ValidationError("متن معتبر لازم است")
-        Activity.objects.create(
+        item = Activity.objects.create(
             machine=m, author=request.user, event=event, comment=comment
         )
+        audit(request.user, "activity_added", m.id, activity=item.id, type=event, project=m.project_id)
     elif request.method == "PATCH":
         a = get_object_or_404(
             Activity.objects.select_for_update(),
@@ -522,6 +543,7 @@ def import_detail(request, pk):
             request.data.get("header_row", 1),
             request.data.get("mode", "add_only"),
         )
+        audit(request.user, 'import_previewed', b.id, project=b.project_id, worksheet=b.worksheet, rows=len(rows), issues=len(b.issues))
         return Response(
             {"rows": rows, "issues": b.issues, "version": b.version, "status": b.status}
         )
@@ -591,12 +613,19 @@ def users(request):
         u = get_object_or_404(
             User.objects.select_for_update(), id=request.data.get("id")
         )
+        if u.is_superuser and not request.user.is_superuser:
+            raise PermissionDenied('ویرایش مدیر سیستم فقط برای مدیر سیستم مجاز است')
+        if 'username' in request.data:
+            u.username = str(request.data['username']).strip()
+        if request.data.get('password'):
+            validate_password(request.data['password'], u)
+            u.set_password(request.data['password'])
     previous_admin = u.is_superuser and u.is_active
     for k in ["first_name", "is_active"]:
         if k in request.data:
             setattr(u, k, request.data[k])
     if "is_admin" in request.data:
-        if not request.user.is_superuser:
+        if not request.user.is_superuser and request.data['is_admin'] != u.is_superuser:
             raise PermissionDenied("تغییر مدیر فقط برای مدیر سیستم")
         u.is_superuser = request.data["is_admin"]
         u.is_staff = u.is_superuser
@@ -621,8 +650,13 @@ def users(request):
         .exists()
     ):
         raise ValidationError("آخرین مدیر فعال قابل حذف یا تنزل نیست")
+    u.full_clean(exclude=['password'])
     u.save()
-    audit(request.user, "user_saved", u.id)
+    if u.pk == request.user.pk and request.data.get('password'):
+        update_session_auth_hash(request, u)
+    audit(request.user, "user_saved", u.id, username=u.username, is_active=u.is_active,
+          is_admin=u.is_superuser, permissions=u.independent_permissions,
+          password_changed=bool(request.data.get('password')))
     return Response(profile(u))
 
 
@@ -665,13 +699,48 @@ def memberships(request, pk):
 @api_view(["GET"])
 def audit_events(request):
     global_require(request.user, "audit_view")
-    return Response(
-        list(
-            Audit.objects.order_by("-created_at")[:500].values(
-                "id", "user__username", "event", "target", "metadata", "created_at"
-            )
-        )
-    )
+    query = Audit.objects.all()
+    category = request.query_params.get('category', '')
+    categories = {'auth': ['login', 'logout', 'password', 'account_password'], 'inventory': ['machine', 'activity', 'credential', 'comment', 'inventory'],
+                  'projects': ['project', 'environment', 'membership'], 'files': ['import', 'export'],
+                  'users': ['user'], 'updates': ['update', 'release'], 'settings': ['auth_settings']}
+    if category:
+        if category not in categories:
+            raise ValidationError('دسته رویداد نامعتبر است')
+        filters = Q()
+        for prefix in categories[category]:
+            filters |= Q(event__startswith=prefix)
+        query = query.filter(filters)
+    if request.query_params.get('user'):
+        query = query.filter(user__username__icontains=request.query_params['user'][:150])
+    if request.query_params.get('search'):
+        search = request.query_params['search'][:180]
+        query = query.filter(Q(event__icontains=search) | Q(target__icontains=search))
+    for key, lookup in [('from', 'created_at__date__gte'), ('to', 'created_at__date__lte')]:
+        if request.query_params.get(key):
+            from datetime import date
+            try:
+                value = date.fromisoformat(request.query_params[key])
+            except ValueError:
+                raise ValidationError('تاریخ نامعتبر است')
+            query = query.filter(**{lookup: value})
+    page = max(1, int(request.query_params.get('page', '1')))
+    size = int(request.query_params.get('page_size', '30'))
+    if size not in [30, 50, 100]:
+        raise ValidationError('اندازه صفحه نامعتبر است')
+    count = query.count()
+    return Response({'results': list(query.order_by('-created_at', '-id')[(page - 1) * size:page * size].values(
+        'id', 'user__username', 'event', 'target', 'metadata', 'created_at')),
+        'count': count, 'page': page, 'pages': max(1, (count + size - 1) // size), 'page_size': size})
+
+
+@api_view(['GET'])
+def audit_detail(request, pk):
+    global_require(request.user, 'audit_view')
+    event = get_object_or_404(Audit, pk=pk)
+    activity_id = event.metadata.get('activity')
+    changes = list(Change.objects.filter(activity_id=activity_id).exclude(field__in=['password', 'credential']).values('field', 'previous', 'value')) if activity_id else []
+    return Response({'metadata': event.metadata, 'changes': changes})
 
 
 @api_view(["GET", "PATCH"])
@@ -716,7 +785,7 @@ def updates(request):
         .values_list("value", flat=True)
         .first()
     )
-    runs = list(UpdateRun.objects.order_by("-created_at")[:30].values())
+    runs = list(UpdateRun.objects.order_by("-created_at")[:30].values('id', 'from_version', 'to_version', 'status', 'progress', 'backup_path', 'error', 'created_at', 'updated_at', 'user__username'))
     for run in runs:
         journal = settings.UPDATE_STATE / ("progress-" + str(run["id"]) + ".json")
         if journal.exists():
@@ -736,8 +805,17 @@ def updates(request):
             "available": cached,
             "execution_enabled": settings.UPDATE_EXECUTION_ENABLED,
             "runs": runs,
+            "uploads": list(UpdateUpload.objects.order_by('-created_at')[:30].values('id', 'version', 'status', 'error', 'created_at', 'updated_at', 'user__username')),
         }
     )
+
+
+@api_view(['POST'])
+def update_upload(request):
+    from .updates import receive_upload
+    global_require(request.user, 'perform_updates')
+    upload = receive_upload(request.user, request.FILES.get('file'))
+    return Response({'id': upload.id, 'version': upload.version, 'status': upload.status}, status=202)
 
 
 @api_view(["GET"])
@@ -749,6 +827,8 @@ def management_reports(request):
     if environment_id and project is None:
         raise ValidationError("برای انتخاب محیط، پروژه را انتخاب کنید")
     environment = get_object_or_404(Environment, pk=environment_id, project=project) if environment_id else None
-    response = Response(management_report(scope(request.user), project, environment, int(request.query_params.get("page", 1))))
+    response = Response(management_report(scope(request.user), project, environment,
+        int(request.query_params.get('page', 1)), int(request.query_params.get('page_size', 50)), request.query_params.get('summary') != '1'))
+    audit(request.user, 'report_viewed', project.id if project else '', scope='project' if project else 'accessible_projects', environment=environment_id or '', page=request.query_params.get('page','1'))
     response["Cache-Control"] = "no-store"
     return response

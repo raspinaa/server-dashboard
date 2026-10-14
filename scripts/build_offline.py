@@ -63,6 +63,11 @@ def create(root, output, key, enterprise_ca=None, proxy_host=None):
         wheels=offline/'wheels';wheels.mkdir()
         for command in wheel_commands(stage,wheels):run(command)
         build(stage,output,key)
+        # A single portable web-upload envelope; payload remains independently signed.
+        import zipfile
+        with zipfile.ZipFile(output / f'infrahub-{version}.zip', 'w', compression=zipfile.ZIP_STORED) as archive:
+            for name in ['manifest.json', 'manifest.sig', f'infrahub-{version}.tar.gz']:
+                archive.write(output / name, name)
         # Preparation scripts are for the explicitly connected prerequisite phase.
         shutil.copytree(root/'scripts',output/'prepare/scripts',ignore=shutil.ignore_patterns('__pycache__','*.pyc','*.key','*.pem','.env*'))
         (output/'README.txt').write_text('Prepare once with internet: sudo bash prepare/scripts/prepare-server.sh --apply\nThen disconnect. Install: sudo infrahub-install PACKAGE_DIRECTORY --public-key TRUSTED_KEY --host HOST --apply\nUpdate: sudo infrahub update PACKAGE_DIRECTORY\nThe public key must be trusted independently; never include a private signing key.\n')

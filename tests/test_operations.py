@@ -92,16 +92,16 @@ def test_compose_storage_and_boundaries():
 
 def test_update_permission_and_lock(setup):
     a, *_ = setup
-    SystemSetting.objects.create(key="release_check", value={"version": "0.3.0"})
+    SystemSetting.objects.create(key="release_check", value={"version": "0.4.0"})
     u = User.objects.create_user("ordinary")
     with pytest.raises(Exception):
-        queue_update(u, "0.3.0")
-    r = queue_update(a, "0.3.0")
+        queue_update(u, "0.4.0")
+    r = queue_update(a, "0.4.0")
     assert r.status == "queued"
     with pytest.raises(Exception):
-        queue_update(a, "0.3.0")
+        queue_update(a, "0.4.0")
     with pytest.raises(Exception):
-        queue_update(a, "0.3.0;touch /tmp/x")
+        queue_update(a, "0.4.0;touch /tmp/x")
 
 
 def test_release_check_local_package(setup, settings, monkeypatch):
@@ -109,8 +109,8 @@ def test_release_check_local_package(setup, settings, monkeypatch):
     monkeypatch.setattr(requests, 'get', lambda *a, **kw: (_ for _ in ()).throw(AssertionError('No network permitted')))
     settings.UPDATE_STATE.mkdir()
     path=settings.UPDATE_STATE/'offline-release.json'
-    path.write_text(json.dumps({'version':'0.3.0','notes':'Local package','compatibility':{'offline':True}}))
-    assert check_release(setup[0])['version']=='0.3.0'
+    path.write_text(json.dumps({'version':'0.4.0','notes':'Local package','compatibility':{'offline':True}}))
+    assert check_release(setup[0])['version']=='0.4.0'
     path.unlink()
     with pytest.raises(Exception) as error:check_release(setup[0])
     assert 'GitHub' not in str(error.value)
@@ -121,8 +121,8 @@ def test_update_claim_rechecks_permission(setup):
 
     a, *_ = setup
     u = User.objects.create_user("updater", independent_permissions=["perform_updates"])
-    SystemSetting.objects.create(key="release_check", value={"version": "0.3.0"})
-    r = queue_update(u, "0.3.0")
+    SystemSetting.objects.create(key="release_check", value={"version": "0.4.0"})
+    r = queue_update(u, "0.4.0")
     u.independent_permissions = []
     u.save()
     from unittest.mock import patch

@@ -224,6 +224,20 @@ class Audit(models.Model):
     metadata = models.JSONField(default=dict)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        indexes = [models.Index(fields=['created_at', 'id'], name='audit_time_id_idx'), models.Index(fields=['event', 'created_at'], name='audit_event_time_idx')]
+
+
+class UpdateUpload(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.PROTECT)
+    version = models.CharField(max_length=40)
+    sha256 = models.CharField(max_length=64)
+    status = models.CharField(max_length=20, default='pending')
+    error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
 
 class LoginAttempt(models.Model):
     key = models.CharField(max_length=64, unique=True)

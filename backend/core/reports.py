@@ -5,7 +5,7 @@ from django.utils import timezone
 from .models import Machine, Disk, Activity, Project, Environment
 
 
-def management_report(projects, project=None, environment=None, page=1):
+def management_report(projects, project=None, environment=None, page=1, page_size=50, include_details=True):
     projects = projects.filter(archived=False)
     if project is not None:
         projects = projects.filter(pk=project.pk)
@@ -27,22 +27,27 @@ def management_report(projects, project=None, environment=None, page=1):
         return [{**row, 'ram': str(row['ram'] or 0), 'disk': str(capacities.get(tuple(row[key] for key in dimensions), 0))} for row in grouped]
 
     machine_count = rows.count()
-    page_count = max(1, (machine_count + 49) // 50)
+    if page_size not in [30, 50, 100]:
+        from rest_framework.exceptions import ValidationError
+        raise ValidationError('اندازه صفحه نامعتبر است')
+    page_count = max(1, (machine_count + page_size - 1) // page_size)
     if page < 1 or page > page_count:
         from rest_framework.exceptions import ValidationError
         raise ValidationError("صفحه گزارش نامعتبر است")
     details = []
-    for machine in rows.select_related('project','environment','application').prefetch_related('disks').order_by('project_id','server_name','id')[(page-1)*50:page*50]:
+    detail_rows = rows.select_related('project','environment','application').prefetch_related('disks').order_by('project_id','environment__name','server_name','id')[(page-1)*page_size:page*page_size] if include_details else []
+    for machine in detail_rows:
         details.append({'id': str(machine.id), 'project_name': machine.project.name,
                         'environment_name': machine.environment.name,
                         'application': machine.application.name if machine.application else '',
                         **{name: getattr(machine, name) for name in ('server_name','vms','cpu','ram','os','network','ip','subnet','gateway','username','status')},
+                        'interfaces': machine.interfaces or ([{key:getattr(machine,key) for key in ['ip','subnet','gateway','network']}] if machine.ip else []),
                         'disks': [{'name': disk.name, 'size': str(disk.size)} for disk in machine.disks.all()]})
 
     now = timezone.now()
     activity = Activity.objects.filter(machine__in=rows, created_at__gte=now-timedelta(days=30))
     return {
-        'generated_at': now, 'machines': details, 'page': page, 'pages': page_count, 'scope': 'selected_project' if project else 'accessible_projects',
+        'generated_at': now, 'machines': details, 'page': page, 'pages': page_count, 'page_size':page_size,'scope': 'selected_project' if project else 'accessible_projects',
         'totals': totals(rows), 'project_count': projects.count(),
         'environment_count': Environment.objects.filter(project__in=projects, archived=False, **({'pk': environment.pk} if environment else {})).count(),
         'projects': groups('project_id', 'project__name'),

@@ -1,7 +1,7 @@
 import json, sys
 from django.core.management.base import BaseCommand
 from django.db import transaction
-from core.models import UpdateRun
+from core.models import UpdateRun, UpdateUpload, SystemSetting
 from core.security import audit
 
 
@@ -12,14 +12,37 @@ class Command(BaseCommand):
 
     def add_arguments(self, p):
         p.add_argument(
-            "action", choices=["claim", "progress", "finish", "fail", "recover"]
+            "action", choices=["claim", "progress", "finish", "fail", "recover", "claim_upload", "upload_ready", "upload_fail"]
         )
 
     @transaction.atomic
     def handle(self, *args, **opts):
         data = json.loads(sys.stdin.read() or "{}")
         action = opts["action"]
+        if action == 'claim_upload':
+            SystemSetting.objects.get_or_create(key='update_lock', defaults={'value': {}})
+            SystemSetting.objects.select_for_update().get(key='update_lock')
+            upload = UpdateUpload.objects.select_for_update().filter(status='pending').order_by('created_at').first()
+            if not upload:
+                self.stdout.write('{}'); return
+            if not upload.user.is_active or not (upload.user.is_superuser or 'perform_updates' in upload.user.independent_permissions):
+                upload.status='failed'; upload.error='مجوز به‌روزرسانی لغو شده است'; upload.save()
+                audit(upload.user, 'update_upload_failed', upload.id, reason='permission_revoked')
+                self.stdout.write('{}'); return
+            upload.status='processing'; upload.save()
+            self.stdout.write(json.dumps({'id':str(upload.id), 'version':upload.version, 'sha256':upload.sha256})); return
+        if action in ['upload_ready', 'upload_fail']:
+            upload = UpdateUpload.objects.select_for_update().get(id=data['id'], status='processing')
+            upload.status='ready' if action=='upload_ready' else 'failed'
+            upload.error='' if action=='upload_ready' else 'بسته روی سرور تأیید نشد؛ گزارش سرویس بررسی شود'
+            if action=='upload_ready':
+                from core.updates import check_release
+                check_release(upload.user)
+            upload.save()
+            audit(upload.user, 'update_upload_ready' if action=='upload_ready' else 'update_upload_failed', upload.id, version=upload.version)
+            self.stdout.write('{}'); return
         if action == "recover":
+            UpdateUpload.objects.filter(status='processing').update(status='failed', error='بررسی بسته با راه‌اندازی مجدد سرویس متوقف شد؛ فایل را دوباره بارگذاری کنید')
             for r in UpdateRun.objects.select_for_update().filter(status="running"):
                 r.status = "failed"
                 r.error = "Helper restarted during update; inspect journal/backup before retry"

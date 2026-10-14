@@ -15,7 +15,24 @@ import {
   time,
 } from "./api";
 import "./style.css";
+import "./design.css";
 import { defaultImportDecision } from "./imports";
+import {
+  Icon,
+  MetricCard,
+  BarChart,
+  DonutChart,
+  Pager,
+  SectionHeading,
+  number,
+} from "./design";
+import { eventLabels, categoryLabels } from "./events";
+import {
+  Dashboard,
+  PasswordDialog,
+  ProjectPicker,
+  ProjectSelector,
+} from "./pages";
 type Env = { id: number; name: string; archived: boolean; version: number };
 type Project = {
   id: number;
@@ -82,10 +99,11 @@ function navigate() {
   );
 }
 const nav = [
-  ["inventory", "موجودی ماشین‌ها", "▦"],
-  ["projects", "پروژه‌ها و محیط‌ها", "◈"],
-  ["imports", "مرکز ورود Excel", "↓"],
-  ["exports", "مرکز خروجی Excel", "↑"],
+  ["dashboard", "نمای کلی زیرساخت", "dashboard"],
+  ["inventory", "پروژه‌ها و VM ها", "inventory"],
+  ["projects", "تعریف پروژه", "projects"],
+  ["imports", "ورود فایل اکسل", "imports"],
+  ["exports", "خروجی اکسل از پروژه ها", "exports"],
   ["reports", "گزارش مدیریتی", "▤"],
   ["access", "کاربران و دسترسی", "♧"],
   ["audit", "رویدادهای سیستم", "◷"],
@@ -96,20 +114,25 @@ function App() {
     [boot, setBoot] = useState(true),
     [projects, setProjects] = useState<Project[]>([]),
     [pid, setPid] = useState<number>(0),
-    [section, setSection] = useState("inventory"),
+    [section, setSection] = useState("dashboard"),
     [error, setError] = useState(""),
     [success, setSuccess] = useState(""),
     [busy, setBusy] = useState(false),
     [dark, setDark] = useState(false),
-    [epoch, setEpoch] = useState(0);
+    [epoch, setEpoch] = useState(0),
+    [passwordOpen, setPasswordOpen] = useState(false);
   const sessionGeneration = useRef(0);
   const project = projects.find((p) => p.id === pid);
   const refresh = async () => {
     const generation = sessionGeneration.current;
-    const ps = await api<Project[]>("projects/");
+    const [ps, session] = await Promise.all([
+      api<Project[]>("projects/"),
+      api("session/"),
+    ]);
     if (generation !== sessionGeneration.current) return;
     setProjects(ps);
-    setPid((old) => (ps.some((p) => p.id === old) ? old : ps[0]?.id || 0));
+    setUser(session.user);
+    setPid((old) => (ps.some((p) => p.id === old) ? old : 0));
     setEpoch((e) => e + 1);
   };
   const run = async (fn: () => Promise<void>) => {
@@ -145,14 +168,15 @@ function App() {
   if (boot)
     return (
       <div className="loading" role="status">
-        در حال بارگذاری InfraHub…
+        در حال بارگذاری Infra-HUB…
       </div>
     );
   if (!user)
     return (
       <main className="login">
         <div className="brand">
-          IH <span>InfraHub</span>
+          <Icon name="inventory" size={32} />
+          <span>Infra-HUB</span>
         </div>
         <h1>ورود به فضای مدیریت موجودی</h1>
         <p>داده‌های پروژه؛ از Excel تا همکاری تیمی</p>
@@ -169,7 +193,7 @@ function App() {
               const s = await api("login/", "POST", Object.fromEntries(f));
               sessionGeneration.current++;
               setUser(s.user);
-              setSection("inventory");
+              setSection("dashboard");
               await refresh();
             });
           }}
@@ -190,24 +214,27 @@ function App() {
           </label>
           <button disabled={busy}>ورود امن</button>
         </form>
-        <small>ورود سازمانی پیکربندی نشده · MFA: قابلیت آینده</small>
+        <small>مدیریت یکپارچه پروژه‌ها، ماشین‌ها و منابع زیرساخت</small>
       </main>
     );
   return (
     <div className="shell">
       <aside>
         <div className="brand">
-          IH{" "}
-          <span>
-            InfraHub<small>پورتال موجودی زیرساخت</small>
-          </span>
+          <Icon name="inventory" size={32} />
+          <span>Infra-HUB</span>
         </div>
         <p className="navlabel">فضای کاری</p>
         <nav>
           {nav
             .filter(
               ([k]) =>
-                !["access", "audit"].includes(k) ||
+                !["access", "audit", "settings", "imports"].includes(k) ||
+                (k === "settings" &&
+                  (user.is_admin ||
+                    user.permissions.includes("perform_updates"))) ||
+                (k === "imports" &&
+                  projects.some((p) => p.role === "manager" && !p.archived)) ||
                 (k === "access" &&
                   (user.is_admin ||
                     user.permissions.includes("manage_users"))) ||
@@ -225,11 +252,29 @@ function App() {
                   setSuccess("");
                 }}
               >
-                <span aria-hidden="true">{i}</span>
+                <Icon name={k} />
                 {t}
               </button>
             ))}
         </nav>
+        {section === "inventory" && (
+          <div className="sidebar-projects" aria-label="پروژه‌های موجودی">
+            {projects
+              .filter((p) => !p.archived)
+              .map((p) => (
+                <button
+                  key={p.id}
+                  className={pid === p.id ? "selected" : ""}
+                  onClick={() => {
+                    if (navigate()) setPid(p.id);
+                  }}
+                >
+                  <Icon name="projects" size={16} />
+                  {p.name}
+                </button>
+              ))}
+          </div>
+        )}
         <div className="asidebottom">
           <strong>{user.first_name || user.username}</strong>
           <small>جلسه محلی · دسترسی پروژه‌ای</small>
@@ -244,41 +289,66 @@ function App() {
             <h1>{nav.find((n) => n[0] === section)?.[1]}</h1>
           </div>
           <div className="toolbar">
-            <button
-              className="ghost"
-              aria-label="خروج از حساب"
-              onClick={() => {
-                if (!navigate()) return;
-                run(async () => {
-                  sessionGeneration.current++;
-                  await api("logout/", "POST");
-                  setUser(null);
-                  setProjects([]);
-                  setPid(0);
-                  setSection("inventory");
-                });
-              }}
-            >
-              خروج
-            </button>
-            <label className="compact">
-              پروژه
-              <select
-                aria-label="انتخاب پروژه"
-                value={pid}
-                onChange={(e) => {
-                  if (navigate()) setPid(Number(e.target.value));
-                }}
-              >
-                <option value={0}>انتخاب پروژه</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                    {p.archived ? " (بایگانی)" : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <details className="profile-menu">
+              <summary aria-label="منوی حساب کاربری">
+                <span className="avatar">
+                  <Icon name="user" />
+                </span>
+                <span>{user.first_name || user.username}</span>
+                <Icon name="chevron" size={16} />
+              </summary>
+              <div className="profile-options">
+                <strong>{user.username}</strong>
+                <button
+                  className="ghost"
+                  onClick={(e) => {
+                    (
+                      e.currentTarget.closest("details") as HTMLDetailsElement
+                    ).open = false;
+                    setPasswordOpen(true);
+                  }}
+                >
+                  تغییر رمز
+                </button>
+                <button
+                  className="ghost"
+                  aria-label="خروج از حساب"
+                  onClick={() => {
+                    if (!navigate()) return;
+                    run(async () => {
+                      sessionGeneration.current++;
+                      await api("logout/", "POST");
+                      setUser(null);
+                      setProjects([]);
+                      setPid(0);
+                      setSection("dashboard");
+                    });
+                  }}
+                >
+                  خروج
+                </button>
+              </div>
+            </details>
+            {section === "inventory" && (
+              <label className="compact">
+                پروژه
+                <select
+                  aria-label="انتخاب پروژه"
+                  value={pid}
+                  onChange={(e) => {
+                    if (navigate()) setPid(Number(e.target.value));
+                  }}
+                >
+                  <option value={0}>انتخاب پروژه</option>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                      {p.archived ? " (بایگانی)" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <button
               className="ghost"
               aria-label="تغییر ظاهر"
@@ -289,6 +359,13 @@ function App() {
           </div>
         </header>
         <main key={user.id}>
+          {passwordOpen && (
+            <PasswordDialog
+              run={run}
+              close={() => setPasswordOpen(false)}
+              notice={setSuccess}
+            />
+          )}
           {error && (
             <div role="alert" className="error">
               {error}
@@ -304,7 +381,65 @@ function App() {
               در حال انجام…
             </div>
           )}
-          {section === "projects" ? (
+          {section === "dashboard" ? (
+            <Dashboard
+              epoch={epoch}
+              projects={projects}
+              openProject={(id) => {
+                setPid(id);
+                setSection("inventory");
+              }}
+            />
+          ) : section === "inventory" ? (
+            <>
+              <ProjectPicker
+                projects={projects}
+                selected={pid}
+                select={setPid}
+              />
+              {project ? (
+                <Inventory
+                  key={project.id}
+                  project={project}
+                  epoch={epoch}
+                  user={user}
+                  run={run}
+                  refresh={refresh}
+                  notice={setSuccess}
+                />
+              ) : (
+                <div className="empty">
+                  برای نمایش ماشین‌ها، یکی از پروژه‌ها را انتخاب کنید.
+                </div>
+              )}
+            </>
+          ) : section === "imports" ? (
+            <>
+              <ProjectSelector
+                label="پروژه مقصد فایل اکسل"
+                projects={projects.filter(
+                  (p) => p.role === "manager" && !p.archived,
+                )}
+                value={pid}
+                select={(id) => {
+                  if (navigate()) setPid(id);
+                }}
+              />
+              {project?.role === "manager" && !project.archived ? (
+                <Imports
+                  key={project.id}
+                  project={project}
+                  run={run}
+                  refresh={refresh}
+                  notice={setSuccess}
+                />
+              ) : (
+                <div className="empty">
+                  پروژه مقصد را انتخاب کنید، سپس فایل را بارگذاری کنید.
+                </div>
+              )}
+            </>
+          ) : section === "projects" ? (
             <Projects
               projects={projects}
               user={user}
@@ -312,12 +447,21 @@ function App() {
               refresh={refresh}
             />
           ) : section === "access" ? (
-            <Access
-              project={project}
-              run={run}
-              epoch={epoch}
-              refresh={refresh}
-            />
+            <>
+              <ProjectSelector
+                label="پروژه برای مدیریت عضویت"
+                projects={projects.filter((p) => p.role === "manager")}
+                value={pid}
+                select={setPid}
+              />
+              <Access
+                project={project?.role === "manager" ? project : undefined}
+                actor={user}
+                run={run}
+                epoch={epoch}
+                refresh={refresh}
+              />
+            </>
           ) : section === "audit" ? (
             <AuditPage run={run} />
           ) : section === "settings" ? (
@@ -336,46 +480,12 @@ function App() {
               run={run}
               notice={setSuccess}
             />
-          ) : !project ? (
-            <div className="empty">
-              <h2>پروژه‌ای انتخاب نشده است</h2>
-              <p>
-                برای شروع یک پروژه بسازید یا از مدیر بخواهید عضویت شما را تعریف
-                کند.
-              </p>
-              <button onClick={() => setSection("projects")}>
-                مدیریت پروژه‌ها
-              </button>
-            </div>
-          ) : section === "inventory" ? (
-            <Inventory
-              key={project.id}
-              project={project}
-              epoch={epoch}
-              user={user}
-              run={run}
-              refresh={refresh}
-              notice={setSuccess}
-            />
-          ) : section === "imports" ? (
-            <Imports
-              key={project.id}
-              project={project}
-              run={run}
-              refresh={refresh}
-              notice={setSuccess}
-            />
           ) : (
-            <Exports
-              project={project}
-              projects={projects}
-              run={run}
-              notice={setSuccess}
-            />
+            <div className="empty">بخش مورد نظر در دسترس نیست.</div>
           )}
         </main>
         <footer>
-          InfraHub · منابع تخصیص‌یافته از موجودی ثبت‌شده محاسبه می‌شوند؛ پایش
+          Infra-HUB · منابع تخصیص‌یافته از موجودی ثبت‌شده محاسبه می‌شوند؛ پایش
           زنده انجام نمی‌شود.
         </footer>
       </div>
@@ -395,11 +505,27 @@ function Projects({
   refresh: () => Promise<void>;
 }) {
   const [selected, setSelected] = useState<Project | null>(null);
+  const [open, setOpen] = useState(false);
   return (
     <>
       <section className="panel">
-        <h2>{selected ? "ویرایش پروژه" : "تعریف پروژه"}</h2>
-        {(user.is_admin || selected) && (
+        <SectionHeading
+          title={selected ? "ویرایش پروژه" : "تعریف پروژه"}
+          description="مشخصات پروژه و محیط‌های آن را در یک محل مدیریت کنید."
+        >
+          {user.is_admin && (
+            <button
+              onClick={() => {
+                setSelected(null);
+                setOpen(!open);
+              }}
+              aria-expanded={open}
+            >
+              تعریف پروژه جدید <Icon name="chevron" />
+            </button>
+          )}
+        </SectionHeading>
+        {open && (user.is_admin || selected) && (
           <form
             key={selected?.id || "new"}
             className="formgrid"
@@ -417,6 +543,7 @@ function Projects({
                   },
                 );
                 setSelected(null);
+                setOpen(false);
                 await refresh();
               });
             }}
@@ -461,7 +588,10 @@ function Projects({
                 <button
                   type="button"
                   className="ghost"
-                  onClick={() => setSelected(null)}
+                  onClick={() => {
+                    setSelected(null);
+                    setOpen(false);
+                  }}
                 >
                   لغو
                 </button>
@@ -485,42 +615,53 @@ function Projects({
             </small>
             {p.role === "manager" && (
               <>
-                <button className="ghost" onClick={() => setSelected(p)}>
+                <button
+                  className="ghost"
+                  onClick={() => {
+                    setSelected(p);
+                    setOpen(true);
+                  }}
+                  aria-expanded={selected?.id === p.id && open}
+                >
                   ویرایش پروژه
                 </button>
-                <h3>محیط‌ها</h3>
-                {p.environments.map((env) => (
-                  <EnvironmentRow
-                    key={env.id + "-" + env.version}
-                    env={env}
-                    project={p}
-                    run={run}
-                    refresh={refresh}
-                  />
-                ))}
-                <form
-                  className="inlineform"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    const f = e.currentTarget,
-                      name = new FormData(f).get("name");
-                    run(async () => {
-                      await api(`projects/${p.id}/environments/`, "POST", {
-                        name,
-                      });
-                      f.reset();
-                      await refresh();
-                    });
-                  }}
-                >
-                  <input
-                    name="name"
-                    aria-label="نام محیط جدید"
-                    placeholder="محیط جدید، مثلاً Staging"
-                    required
-                  />
-                  <button>افزودن</button>
-                </form>
+                {selected?.id === p.id && open && (
+                  <>
+                    <h3>محیط‌ها</h3>
+                    {p.environments.map((env) => (
+                      <EnvironmentRow
+                        key={env.id + "-" + env.version}
+                        env={env}
+                        project={p}
+                        run={run}
+                        refresh={refresh}
+                      />
+                    ))}
+                    <form
+                      className="inlineform"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        const f = e.currentTarget,
+                          name = new FormData(f).get("name");
+                        run(async () => {
+                          await api(`projects/${p.id}/environments/`, "POST", {
+                            name,
+                          });
+                          f.reset();
+                          await refresh();
+                        });
+                      }}
+                    >
+                      <input
+                        name="name"
+                        aria-label="نام محیط جدید"
+                        placeholder="محیط جدید، مثلاً Staging"
+                        required
+                      />
+                      <button>افزودن</button>
+                    </form>
+                  </>
+                )}
               </>
             )}
           </section>
@@ -589,6 +730,9 @@ function Inventory({
   const [env, setEnv] = useState(""),
     [search, setSearch] = useState(""),
     [page, setPage] = useState(1),
+    [pageSize, setPageSize] = useState(30),
+    [sort, setSort] = useState("environment"),
+    [direction, setDirection] = useState("asc"),
     [rows, setRows] = useState<Machine[]>([]),
     [count, setCount] = useState(0),
     [stats, setStats] = useState<any>(null),
@@ -603,7 +747,7 @@ function Inventory({
     run(async () => {
       const [r, s] = await Promise.all([
         api(
-          `projects/${project.id}/machines/?environment=${env}&search=${encodeURIComponent(search)}&page=${page}`,
+          `projects/${project.id}/machines/?environment=${env}&search=${encodeURIComponent(search)}&page=${page}&page_size=${pageSize}&sort=${sort}&direction=${direction}`,
         ),
         api(`projects/${project.id}/overview/?environment=${env}`),
       ]);
@@ -618,7 +762,7 @@ function Inventory({
       live = false;
       setExpanded("");
     };
-  }, [project.id, env, search, page, epoch]);
+  }, [project.id, env, search, page, pageSize, sort, direction, epoch]);
   const max = Math.max(2, ...rows.map((m) => m.disks.length));
   return (
     <>
@@ -809,18 +953,81 @@ function Inventory({
                     "Username",
                     "رمز",
                     "وضعیت",
-                  ].map((h) => (
-                    <th key={h} className={h === "Server Name" ? "sticky" : ""}>
-                      {h}
-                    </th>
-                  ))}
+                  ].map((h, index) => {
+                    const fields = [
+                      "",
+                      "environment",
+                      "server_name",
+                      "application",
+                      "vms",
+                      "cpu",
+                      "ram",
+                      ...Array.from({ length: max }, (_, i) => `disk_${i}`),
+                      "os",
+                      "network",
+                      "ip",
+                      "subnet",
+                      "gateway",
+                      "username",
+                      "",
+                      "status",
+                    ];
+                    const field = fields[index];
+                    return (
+                      <th
+                        key={h}
+                        className={h === "Server Name" ? "sticky" : ""}
+                        aria-sort={
+                          field === sort
+                            ? direction === "asc"
+                              ? "ascending"
+                              : "descending"
+                            : undefined
+                        }
+                      >
+                        {field ? (
+                          <button
+                            className="sort-heading"
+                            onClick={() => {
+                              setSort(field);
+                              setDirection(
+                                field === sort && direction === "asc"
+                                  ? "desc"
+                                  : "asc",
+                              );
+                              setPage(1);
+                            }}
+                          >
+                            {h}
+                            <span>
+                              {field === sort
+                                ? direction === "asc"
+                                  ? "↑"
+                                  : "↓"
+                                : "↕"}
+                            </span>
+                          </button>
+                        ) : (
+                          h
+                        )}
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
                 {rows.map((m, i) => (
                   <Fragment key={m.id}>
+                    {!env &&
+                      (i === 0 ||
+                        rows[i - 1].environment_name !==
+                          m.environment_name) && (
+                        <tr className="environment-divider">
+                          <td colSpan={17 + max}>{m.environment_name}</td>
+                        </tr>
+                      )}
                     <tr className={expanded === m.id ? "expanded" : ""}>
-                      <td>{(page - 1) * 100 + i + 1}</td>
+                      <td>{(page - 1) * pageSize + i + 1}</td>
                       <td>{m.environment_name}</td>
                       <td className="sticky">
                         <button
@@ -897,25 +1104,17 @@ function Inventory({
             </table>
           </div>
         )}
-        <div className="pagination">
-          <button
-            disabled={page <= 1}
-            className="ghost"
-            onClick={() => setPage(page - 1)}
-          >
-            قبلی
-          </button>
-          <span>
-            صفحه {page} از {Math.max(1, Math.ceil(count / 100))}
-          </span>
-          <button
-            disabled={page * 100 >= count}
-            className="ghost"
-            onClick={() => setPage(page + 1)}
-          >
-            بعدی
-          </button>
-        </div>
+        <Pager
+          page={page}
+          pages={Math.max(1, Math.ceil(count / pageSize))}
+          count={count}
+          size={pageSize}
+          onPage={setPage}
+          onSize={(size) => {
+            setPageSize(size);
+            setPage(1);
+          }}
+        />
       </section>
     </>
   );
@@ -1003,9 +1202,13 @@ function MachineEditor({
               );
               const created =
                 existing ||
-                (await api<Env>(`projects/${project.id}/environments/`, "POST", {
-                  name: newEnvironmentName,
-                }));
+                (await api<Env>(
+                  `projects/${project.id}/environments/`,
+                  "POST",
+                  {
+                    name: newEnvironmentName,
+                  },
+                ));
               data.environment = created.id;
             }
             const r = await api(
@@ -1732,7 +1935,7 @@ function Imports({
   return (
     <>
       <section className="panel">
-        <h2>مرکز ورود Excel</h2>
+        <h2>ورود فایل اکسل</h2>
         <p>
           فایل را انتخاب کنید؛ ستون‌ها و بخش‌ها خودکار شناسایی می‌شوند.
           پیش‌نمایش را بررسی و یک‌بار تأیید کنید.
@@ -2069,14 +2272,54 @@ function Imports({
         )}
       </section>
       <section className="panel">
-        <h2>تاریخچه ورود</h2>
+        <SectionHeading
+          title="تاریخچه ورود فایل‌ها"
+          description="نتیجه پردازش و تعداد تغییرات هر فایل در پروژه انتخاب‌شده"
+        />
         {history.map((b) => (
           <article className="historyitem" key={b.id}>
             <b>{b.filename}</b>
             <span>
-              {b.status} · {time(b.created_at)} · {JSON.stringify(b.counts)}
+              <span
+                className={
+                  "badge " +
+                  (b.status === "applied"
+                    ? "active"
+                    : b.issues.length
+                      ? "failed"
+                      : "pending")
+                }
+              >
+                {(
+                  {
+                    uploaded: "بارگذاری‌شده",
+                    previewed: "بررسی‌شده",
+                    applied: "اعمال‌شده",
+                  } as Record<string, string>
+                )[b.status] || b.status}
+              </span>{" "}
+              · {time(b.created_at)}
             </span>
-            {b.issues.length > 0 && <pre>{JSON.stringify(b.issues)}</pre>}
+            <div className="history-counts">
+              {Object.entries(b.counts || {}).map(([key, value]) => (
+                <span key={key}>
+                  {(
+                    {
+                      added: "افزوده",
+                      updated: "ویرایش‌شده",
+                      skipped: "ردشده",
+                    } as Record<string, string>
+                  )[key] || key}
+                  : {String(value)}
+                </span>
+              ))}
+            </div>
+            {b.issues.length > 0 && (
+              <details>
+                <summary>{b.issues.length} مورد نیازمند بررسی</summary>
+                <pre>{JSON.stringify(b.issues, null, 2)}</pre>
+              </details>
+            )}
             <button
               className="ghost"
               onClick={() =>
@@ -2128,7 +2371,7 @@ function Exports({
   }, [initialProject?.id]);
   return (
     <section className="panel">
-      <h2>خروجی از داده‌های فعلی پایگاه داده</h2>
+      <h2>خروجی اکسل از پروژه‌ها</h2>
       <p>
         مقادیر ویرایش‌شده در وب، ستون‌های مستقل دیسک و UUID مخفی در خروجی حفظ
         می‌شوند. رمزها به‌صورت پیش‌فرض حذف شده‌اند.
@@ -2251,17 +2494,20 @@ function PermissionChecks({
   );
 }
 function Access({
+  actor,
   project,
   run,
   epoch,
   refresh,
 }: {
+  actor: User;
   project?: Project;
   run: Run;
   epoch: number;
   refresh: () => Promise<void>;
 }) {
   const [users, setUsers] = useState<User[]>([]),
+    [editorOpen, setEditorOpen] = useState(false),
     [members, setMembers] = useState<any[]>([]),
     [edit, setEdit] = useState<User | null>(null),
     [perms, setPerms] = useState<string[]>([]),
@@ -2278,114 +2524,171 @@ function Access({
   return (
     <>
       <section className="panel">
-        <h2>{edit ? "ویرایش حساب" : "حساب محلی جدید"}</h2>
-        <form
-          key={edit?.id || "new"}
-          className="formgrid"
-          onSubmit={(e) => {
-            e.preventDefault();
-            const d = Object.fromEntries(new FormData(e.currentTarget));
-            run(async () => {
-              await api("users/", edit ? "PATCH" : "POST", {
-                ...d,
-                id: edit?.id,
-                is_active: d.is_active === "on",
-                is_admin: d.is_admin === "on",
-                permissions: perms,
-              });
+        <SectionHeading
+          title="کاربران سامانه"
+          description="حساب‌ها، وضعیت و مجوزهای مستقل کاربران"
+        >
+          <button
+            onClick={() => {
               setEdit(null);
               setPerms([]);
-              await load();
-              await refresh();
-            });
-          }}
-        >
-          <label>
-            نام کاربری
-            <input
-              name="username"
-              dir="ltr"
-              defaultValue={edit?.username}
-              disabled={!!edit}
-              required
-            />
-          </label>
-          <label>
-            نام نمایشی
-            <input name="first_name" defaultValue={edit?.first_name} />
-          </label>
-          {!edit && (
-            <label>
-              رمز حساب
-              <input
-                type="password"
-                name="password"
-                minLength={12}
-                required
-                autoComplete="new-password"
-              />
-            </label>
-          )}
-          <label className="check">
-            <input
-              type="checkbox"
-              name="is_active"
-              defaultChecked={edit ? edit.is_active : true}
-            />
-            فعال
-          </label>
-          <label className="check">
-            <input
-              type="checkbox"
-              name="is_admin"
-              defaultChecked={edit?.is_admin}
-            />
-            مدیر سیستم
-          </label>
-          <div className="wide">
-            <h3>مجوزهای مستقل</h3>
-            <PermissionChecks
-              global
-              selected={perms}
-              toggle={(p) =>
-                setPerms(
-                  perms.includes(p)
-                    ? perms.filter((x) => x !== p)
-                    : [...perms, p],
-                )
-              }
-            />
-          </div>
-          <div className="actions">
-            <button>ذخیره حساب</button>
-            {edit && (
-              <button
-                className="ghost"
-                type="button"
-                onClick={() => {
+              setEditorOpen(!editorOpen);
+            }}
+          >
+            تعریف کاربر جدید <Icon name="chevron" />
+          </button>
+        </SectionHeading>
+        {editorOpen && (
+          <>
+            <h3>{edit ? "ویرایش حساب" : "حساب محلی جدید"}</h3>
+            <form
+              key={edit?.id || "new"}
+              className="formgrid"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const d = Object.fromEntries(new FormData(e.currentTarget));
+                run(async () => {
+                  await api("users/", edit ? "PATCH" : "POST", {
+                    ...d,
+                    id: edit?.id,
+                    is_active: d.is_active === "on",
+                    is_admin: d.is_admin === "on",
+                    permissions: perms,
+                  });
                   setEdit(null);
+                  setEditorOpen(false);
                   setPerms([]);
-                }}
-              >
-                لغو
-              </button>
-            )}
-          </div>
-        </form>
-        <div className="userlist">
-          {users.map((u) => (
-            <button
-              className="ghost"
-              key={u.id}
-              onClick={() => {
-                setEdit(u);
-                setPerms(u.permissions);
+                  await load();
+                  await refresh();
+                });
               }}
             >
-              {u.username} ·{" "}
-              {u.is_admin ? "مدیر" : u.is_active ? "فعال" : "غیرفعال"}
-            </button>
-          ))}
+              <label>
+                نام کاربری
+                <input
+                  name="username"
+                  dir="ltr"
+                  defaultValue={edit?.username}
+                  required
+                />
+              </label>
+              <label>
+                نام نمایشی
+                <input name="first_name" defaultValue={edit?.first_name} />
+              </label>
+              {
+                <label>
+                  {edit ? "رمز جدید (اختیاری)" : "رمز حساب"}
+                  <input
+                    type="password"
+                    name="password"
+                    minLength={12}
+                    required={!edit}
+                    autoComplete="new-password"
+                  />
+                </label>
+              }
+              <label className="check">
+                <input
+                  type="checkbox"
+                  name="is_active"
+                  defaultChecked={edit ? edit.is_active : true}
+                />
+                فعال
+              </label>
+              <label className="check">
+                <input
+                  type="checkbox"
+                  name="is_admin"
+                  disabled={!actor.is_admin}
+                  defaultChecked={edit?.is_admin}
+                />
+                مدیر سیستم
+              </label>
+              <div className="wide">
+                <h3>مجوزهای مستقل</h3>
+                <PermissionChecks
+                  global
+                  selected={perms}
+                  toggle={(p) =>
+                    setPerms(
+                      perms.includes(p)
+                        ? perms.filter((x) => x !== p)
+                        : [...perms, p],
+                    )
+                  }
+                />
+              </div>
+              <div className="actions">
+                <button>ذخیره حساب</button>
+                {edit && (
+                  <button
+                    className="ghost"
+                    type="button"
+                    onClick={() => {
+                      setEdit(null);
+                      setEditorOpen(false);
+                      setPerms([]);
+                    }}
+                  >
+                    لغو
+                  </button>
+                )}
+              </div>
+            </form>
+          </>
+        )}
+        <h3>حساب‌های سامانه</h3>
+        <div className="tablewrap">
+          <table>
+            <thead>
+              <tr>
+                <th>نام کاربری</th>
+                <th>نام نمایشی</th>
+                <th>وضعیت</th>
+                <th>مجوزهای مستقل</th>
+                <th>مدیریت</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((u) => (
+                <tr key={u.id}>
+                  <td dir="ltr">{u.username}</td>
+                  <td>{u.first_name || "—"}</td>
+                  <td>
+                    <span
+                      className={
+                        "badge " + (u.is_active ? "active" : "archived")
+                      }
+                    >
+                      {u.is_admin
+                        ? "مدیر سیستم"
+                        : u.is_active
+                          ? "فعال"
+                          : "غیرفعال"}
+                    </span>
+                  </td>
+                  <td>
+                    {u.permissions.map((p) => permLabels[p] || p).join("، ") ||
+                      "مجوز پروژه"}
+                  </td>
+                  <td>
+                    <button
+                      className="ghost"
+                      disabled={u.is_admin && !actor.is_admin}
+                      onClick={() => {
+                        setEdit(u);
+                        setPerms(u.permissions);
+                        setEditorOpen(true);
+                      }}
+                    >
+                      ویرایش
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </section>
       {project && (
@@ -2486,13 +2789,136 @@ function Access({
   );
 }
 function AuditPage({ run }: { run: Run }) {
-  const [events, setEvents] = useState<any[]>([]);
+  const auditLabels: Record<string, string> = {
+    ...fields,
+    disks: "دیسک‌ها",
+    fields: "فیلدهای تغییرکرده",
+    project: "شناسه پروژه",
+    server_name: "نام ماشین",
+    source: "منبع",
+    activity: "شناسه فعالیت",
+    scope: "دامنه",
+    page: "صفحه",
+    version: "نسخه",
+    permissions: "مجوزها",
+    is_active: "حساب فعال",
+    is_admin: "مدیر سیستم",
+    password_changed: "رمز تغییر کرده",
+    user_id: "شناسه کاربر",
+    name: "نام",
+    previous: "مقدار قبلی",
+    reason: "علت",
+    counts: "نتیجه ورود",
+    worksheet: "برگه",
+    rows: "ردیف‌ها",
+    issues: "موارد بررسی",
+    type: "نوع فعالیت",
+  };
+  const displayValue = (value: any): string =>
+    value === null || value === undefined
+      ? "—"
+      : typeof value === "boolean"
+        ? value
+          ? "بله"
+          : "خیر"
+        : typeof value === "object"
+          ? JSON.stringify(value)
+          : String(value);
+  const [data, setData] = useState<any>(null),
+    [category, setCategory] = useState(""),
+    [username, setUsername] = useState(""),
+    [search, setSearch] = useState(""),
+    [from, setFrom] = useState(""),
+    [to, setTo] = useState(""),
+    [page, setPage] = useState(1),
+    [size, setSize] = useState(30),
+    [detail, setDetail] = useState<any>(null);
   useEffect(() => {
-    run(async () => setEvents(await api("audit/")));
-  }, []);
+    let live = true;
+    const query = new URLSearchParams({
+      category,
+      user: username,
+      search,
+      from,
+      to,
+      page: String(page),
+      page_size: String(size),
+    });
+    run(async () => {
+      const value = await api("audit/?" + query);
+      if (live) setData(value);
+    });
+    return () => {
+      live = false;
+    };
+  }, [category, username, search, from, to, page, size]);
   return (
     <section className="panel">
-      <h2>رویدادهای غیرقابل ویرایش سیستم</h2>
+      <SectionHeading
+        title="رویدادهای سامانه"
+        description="ردیابی کاربر، زمان و تغییرات؛ رویدادها قابل ویرایش نیستند."
+      />
+      <div className="filterbar">
+        <label>
+          دسته
+          <select
+            value={category}
+            onChange={(e) => {
+              setCategory(e.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="">همه رویدادها</option>
+            {Object.entries(categoryLabels).map(([key, label]) => (
+              <option key={key} value={key}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          کاربر
+          <input
+            value={username}
+            onChange={(e) => {
+              setUsername(e.target.value);
+              setPage(1);
+            }}
+          />
+        </label>
+        <label>
+          عمل یا هدف
+          <input
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
+          />
+        </label>
+        <label>
+          از تاریخ
+          <input
+            type="date"
+            value={from}
+            onChange={(e) => {
+              setFrom(e.target.value);
+              setPage(1);
+            }}
+          />
+        </label>
+        <label>
+          تا تاریخ
+          <input
+            type="date"
+            value={to}
+            onChange={(e) => {
+              setTo(e.target.value);
+              setPage(1);
+            }}
+          />
+        </label>
+      </div>
       <div className="tablewrap">
         <table>
           <thead>
@@ -2501,22 +2927,109 @@ function AuditPage({ run }: { run: Run }) {
               <th>کاربر</th>
               <th>عمل</th>
               <th>هدف</th>
-              <th>جزئیات بدون رمز</th>
+              <th>جزئیات</th>
             </tr>
           </thead>
           <tbody>
-            {events.map((a) => (
-              <tr key={a.id}>
-                <td>{time(a.created_at)}</td>
-                <td>{a.user__username}</td>
-                <td>{a.event}</td>
-                <td dir="ltr">{a.target}</td>
-                <td>{JSON.stringify(a.metadata)}</td>
-              </tr>
+            {data?.results.map((event: any) => (
+              <Fragment key={event.id}>
+                <tr>
+                  <td>{time(event.created_at)}</td>
+                  <td>
+                    {event.user__username ||
+                      event.metadata.username ||
+                      "سامانه"}
+                  </td>
+                  <td>
+                    <span className="badge">
+                      {eventLabels[event.event] || event.event}
+                    </span>
+                  </td>
+                  <td dir="ltr">{event.target || "—"}</td>
+                  <td>
+                    <button
+                      className="ghost"
+                      onClick={() =>
+                        run(async () =>
+                          setDetail(
+                            detail?.id === event.id
+                              ? null
+                              : {
+                                  id: event.id,
+                                  ...(await api(`audit/${event.id}/`)),
+                                },
+                          ),
+                        )
+                      }
+                    >
+                      نمایش جزئیات
+                    </button>
+                  </td>
+                </tr>
+                {detail?.id === event.id && (
+                  <tr>
+                    <td colSpan={5}>
+                      <div className="audit-detail">
+                        <dl className="audit-meta">
+                          {Object.entries(detail.metadata)
+                            .filter(
+                              ([key]) =>
+                                key !== "fields" || !detail.changes.length,
+                            )
+                            .map(([key, value]) => (
+                              <div key={key}>
+                                <dt>{auditLabels[key] || key}</dt>
+                                <dd>{displayValue(value)}</dd>
+                              </div>
+                            ))}
+                        </dl>
+                        {detail.changes.length > 0 && (
+                          <table>
+                            <thead>
+                              <tr>
+                                <th>فیلد</th>
+                                <th>قبل</th>
+                                <th>بعد</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {detail.changes.map((change: any, i: number) => (
+                                <tr key={i}>
+                                  <td>
+                                    {auditLabels[change.field] || change.field}
+                                  </td>
+                                  <td>{displayValue(change.previous)}</td>
+                                  <td>{displayValue(change.value)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
             ))}
           </tbody>
         </table>
       </div>
+      {data && !data.count && (
+        <div className="empty">رویدادی با این فیلتر پیدا نشد.</div>
+      )}
+      {data && (
+        <Pager
+          page={page}
+          pages={data.pages}
+          count={data.count}
+          size={size}
+          onPage={setPage}
+          onSize={(value) => {
+            setSize(value);
+            setPage(1);
+          }}
+        />
+      )}
     </section>
   );
 }
@@ -2530,13 +3043,16 @@ function Settings({
   notice: (s: string) => void;
 }) {
   const [updates, setUpdates] = useState<any>(null),
-    [auth, setAuth] = useState<any>(null);
+    [uploading, setUploading] = useState(false);
   const canUpdate =
       user.is_admin || user.permissions.includes("perform_updates"),
-    canAuth = user.is_admin || user.permissions.includes("auth_settings");
+    uploadBusy =
+      uploading ||
+      updates?.uploads?.some((item: any) =>
+        ["pending", "processing"].includes(item.status),
+      );
   const load = async () => {
     if (canUpdate) setUpdates(await api("updates/"));
-    if (canAuth) setAuth(await api("settings/"));
   };
   useEffect(() => {
     run(load);
@@ -2550,77 +3066,6 @@ function Settings({
   }, []);
   return (
     <>
-      <section className="panel">
-        <h2>تغییر رمز حساب خود</h2>
-        <form
-          className="formgrid"
-          onSubmit={(e) => {
-            e.preventDefault();
-            const f = e.currentTarget;
-            run(async () => {
-              await api(
-                "password/",
-                "POST",
-                Object.fromEntries(new FormData(f)),
-              );
-              f.reset();
-              notice("رمز حساب تغییر کرد");
-            });
-          }}
-        >
-          <label>
-            رمز فعلی
-            <input
-              name="old_password"
-              type="password"
-              autoComplete="current-password"
-              required
-            />
-          </label>
-          <label>
-            رمز جدید
-            <input
-              name="new_password"
-              type="password"
-              autoComplete="new-password"
-              minLength={12}
-              required
-            />
-          </label>
-          <button>تغییر رمز</button>
-        </form>
-      </section>
-      {auth && (
-        <section className="panel">
-          <h2>سیاست جلسه</h2>
-          <form
-            className="inlineform"
-            onSubmit={(e) => {
-              e.preventDefault();
-              const v = new FormData(e.currentTarget).get("session_seconds");
-              run(async () => {
-                await api("settings/", "PATCH", { session_seconds: Number(v) });
-                notice("سیاست برای ورودهای بعدی ذخیره شد");
-              });
-            }}
-          >
-            <label>
-              زمان جلسه (ثانیه)
-              <input
-                type="number"
-                name="session_seconds"
-                min={300}
-                max={86400}
-                defaultValue={auth.session_seconds}
-              />
-            </label>
-            <button>ذخیره</button>
-          </form>
-          <p>
-            OIDC: پیکربندی نشده · MFA: قابلیت آینده؛ در این نسخه اعمال نمی‌شود.
-          </p>
-        </section>
-      )}
       {updates && (
         <section className="panel">
           <div className="sectionhead">
@@ -2633,6 +3078,94 @@ function Settings({
             فقط بسته آفلاین کپی‌شده و امضاشده؛ اجرا توسط سرویس مستقل محدود، خارج
             از درخواست وب.
           </p>
+          <form
+            className="upload-zone"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const form = event.currentTarget;
+              const body = new FormData(form);
+              setUploading(true);
+              run(async () => {
+                try {
+                  const received = await api("updates/upload/", "POST", body);
+                  notice(
+                    `بسته نسخه ${received.version} دریافت شد؛ در حال بررسی روی سرور`,
+                  );
+                  form.reset();
+                  await load();
+                } finally {
+                  setUploading(false);
+                }
+              });
+            }}
+          >
+            <SectionHeading
+              title="بارگذاری نسخه جدید"
+              description="بسته ZIP رسمی و امضاشده را انتخاب کنید. پس از تأیید نسخه، نصب را از همین صفحه شروع کنید."
+            />
+            <label>
+              فایل انتشار
+              <input
+                type="file"
+                name="file"
+                accept=".zip"
+                required
+                disabled={uploadBusy || !updates.execution_enabled}
+              />
+            </label>
+            <button disabled={uploadBusy || !updates.execution_enabled}>
+              {uploading ? "در حال بارگذاری…" : "بارگذاری و بررسی بسته"}
+            </button>
+          </form>
+          {updates.uploads?.length > 0 && (
+            <>
+              <h3>تاریخچه بسته‌های بارگذاری‌شده</h3>
+              <div className="tablewrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>نسخه</th>
+                      <th>کاربر</th>
+                      <th>زمان</th>
+                      <th>وضعیت</th>
+                      <th>نتیجه</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {updates.uploads.map((item: any) => (
+                      <tr key={item.id}>
+                        <td dir="ltr">{item.version}</td>
+                        <td>{item.user__username}</td>
+                        <td>{time(item.updated_at)}</td>
+                        <td>
+                          <span
+                            className={
+                              "badge " +
+                              (item.status === "ready"
+                                ? "active"
+                                : item.status === "failed"
+                                  ? "failed"
+                                  : "pending")
+                            }
+                          >
+                            {(
+                              {
+                                pending: "در صف بررسی",
+                                processing: "در حال تأیید",
+                                ready: "آماده نصب",
+                                failed: "ناموفق",
+                              } as Record<string, string>
+                            )[item.status] || item.status}
+                          </span>
+                        </td>
+                        <td>{item.error || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
           <button
             onClick={() =>
               run(async () => {
@@ -2680,13 +3213,51 @@ function Settings({
           {updates.runs.map((r: any) => (
             <article className="historyitem" key={r.id}>
               <b>
-                {r.from_version} ← {r.to_version} · {r.status}
+                <span dir="ltr">
+                  {r.from_version} → {r.to_version}
+                </span>{" "}
+                ·{" "}
+                <span
+                  className={
+                    "badge " +
+                    (r.status === "completed"
+                      ? "active"
+                      : r.status === "failed"
+                        ? "failed"
+                        : "pending")
+                  }
+                >
+                  {(
+                    {
+                      queued: "در صف نصب",
+                      running: "در حال نصب",
+                      completed: "تکمیل‌شده",
+                      failed: "ناموفق",
+                    } as Record<string, string>
+                  )[r.status] || r.status}
+                </span>
               </b>
-              <span>{time(r.updated_at)}</span>
+              <span>
+                {r.user__username} · {time(r.updated_at)}
+              </span>
               <p>پشتیبان: {r.backup_path || "هنوز ایجاد نشده"}</p>
               <ol>
                 {r.progress.map((s: string, i: number) => (
-                  <li key={i}>{s}</li>
+                  <li key={i}>
+                    {(
+                      {
+                        integrity_verified: "تأیید امضا و یکپارچگی",
+                        preflight_passed: "بررسی پیش‌نیازها",
+                        full_snapshot_complete: "تهیه پشتیبان کامل",
+                        backup_complete: "پشتیبان پایگاه داده آماده شد",
+                        staged: "آماده‌سازی نسخه",
+                        images_ready: "آماده‌سازی سرویس‌ها",
+                        migrations_complete: "به‌روزرسانی ساختار پایگاه داده",
+                        services_restarted: "اجرای سرویس‌های جدید",
+                        healthy: "تأیید سلامت سامانه",
+                      } as Record<string, string>
+                    )[s] || s}
+                  </li>
                 ))}
               </ol>
               {r.error && <p className="error">{r.error}</p>}
@@ -2708,11 +3279,17 @@ function Settings({
               )}
             </article>
           ))}
-          <h3>به‌روزرسانی آفلاین / دستی</h3>
+          {!updates.runs.length && (
+            <div className="empty compact-empty">
+              هنوز نصبی از این صفحه ثبت نشده است.
+            </div>
+          )}
+          <h3>کنترل‌های نصب</h3>
           <p>
-            بسته و manifest امضاشده را آماده کنید؛ از scripts/upgrade.py طبق
-            docs/operations.fa.md استفاده کنید. بازیابی پایگاه داده برای تغییرات
-            غیرقابل برگشت دستی است.
+            پیش از نصب پشتیبان کامل تهیه می‌شود. امضای معتبر، نسخه جدیدتر،
+            سازگاری و سلامت سرویس‌ها بررسی می‌شوند. در صورت شکست، پشتیبان و
+            گزارش مراحل حفظ می‌شوند؛ بازیابی پایگاه داده با تصمیم مدیر انجام
+            می‌شود.
           </p>
         </section>
       )}
@@ -2735,6 +3312,8 @@ function ManagementReports({
   const [pid, setPid] = useState(0);
   const [env, setEnv] = useState("");
   const [detailPage, setDetailPage] = useState(1);
+  const [detailSize, setDetailSize] = useState(30);
+  const [reportTab, setReportTab] = useState("overview");
   const [report, setReport] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -2749,6 +3328,7 @@ function ManagementReports({
     if (pid) query.set("project", String(pid));
     if (env) query.set("environment", env);
     query.set("page", String(detailPage));
+    query.set("page_size", String(detailSize));
     api("reports/?" + query)
       .then((data) => {
         if (active) setReport(data);
@@ -2762,7 +3342,7 @@ function ManagementReports({
     return () => {
       active = false;
     };
-  }, [pid, env, epoch, revision, detailPage]);
+  }, [pid, env, epoch, revision, detailPage, detailSize]);
   const number = (value: any) => Number(value || 0).toLocaleString("fa-IR");
   const label = (row: any) =>
     row.environment__name ||
@@ -2771,28 +3351,14 @@ function ManagementReports({
     row.os ||
     "ثبت‌نشده";
   const chart = (rows: any[], key: string, title: string, unit: string) => (
-    <section className="panel">
-      <h3>
-        {title} · {unit}
-      </h3>
-      {rows.length ? (
-        rows.map((row, i) => (
-          <div className="barrow" key={i}>
-            <span>{label(row)}</span>
-            <div className="bartrack">
-              <i
-                style={{
-                  width: `${(100 * Number(row[key])) / Math.max(1, ...rows.map((r) => Number(r[key])))}%`,
-                }}
-              />
-            </div>
-            <strong>{number(row[key])}</strong>
-          </div>
-        ))
-      ) : (
-        <p>داده‌ای ثبت نشده است.</p>
-      )}
-    </section>
+    <BarChart
+      title={title}
+      unit={unit}
+      values={rows.map((row) => ({
+        label: label(row),
+        value: Number(row[key]),
+      }))}
+    />
   );
   const table = (title: string, rows: any[], getName: (row: any) => string) => (
     <section className="panel">
@@ -2892,6 +3458,28 @@ function ManagementReports({
             زمان تهیه: {time(report.generated_at)} ·{" "}
             {project ? project.name : "کل پروژه‌های مجاز"}
           </p>
+          <div
+            className="tabs report-tabs"
+            role="tablist"
+            aria-label="دسته گزارش"
+          >
+            {[
+              ["overview", "نمودارها و منابع"],
+              ["groups", "تفکیک منابع"],
+              ["machines", "فهرست ماشین‌ها"],
+              ["quality", "کیفیت و فعالیت"],
+            ].map(([key, title]) => (
+              <button
+                key={key}
+                role="tab"
+                aria-selected={reportTab === key}
+                className={reportTab === key ? "selected" : ""}
+                onClick={() => setReportTab(key)}
+              >
+                {title}
+              </button>
+            ))}
+          </div>
           <div className="metrics">
             {[
               [report.project_count, "پروژه"],
@@ -2902,191 +3490,214 @@ function ManagementReports({
               [report.totals.ram, "RAM (GB)"],
               [report.totals.disk, "Disk (GB)"],
             ].map(([value, name]) => (
-              <div className="metric" key={String(name)}>
-                <span>{name}</span>
-                <strong>{number(value)}</strong>
+              <MetricCard
+                key={String(name)}
+                label={String(name)}
+                value={value}
+                tone={
+                  ["blue", "teal", "violet", "amber"][String(name).length % 4]
+                }
+              />
+            ))}
+          </div>
+          {reportTab === "overview" && (
+            <>
+              <div className="graphs">
+                {chart(
+                  project ? report.environments : report.projects,
+                  "cpu",
+                  project ? "CPU به تفکیک محیط" : "CPU به تفکیک پروژه",
+                  "Core",
+                )}
+                {chart(
+                  project ? report.environments : report.projects,
+                  "ram",
+                  project ? "RAM به تفکیک محیط" : "RAM به تفکیک پروژه",
+                  "GB",
+                )}
+                {chart(
+                  project ? report.environments : report.projects,
+                  "disk",
+                  project ? "دیسک به تفکیک محیط" : "دیسک به تفکیک پروژه",
+                  "GB",
+                )}
               </div>
-            ))}
-          </div>
-          <div className="graphs">
-            {chart(
-              project ? report.environments : report.projects,
-              "cpu",
-              project ? "CPU به تفکیک محیط" : "CPU به تفکیک پروژه",
-              "Core",
-            )}
-            {chart(
-              project ? report.environments : report.projects,
-              "ram",
-              project ? "RAM به تفکیک محیط" : "RAM به تفکیک پروژه",
-              "GB",
-            )}
-            {chart(
-              project ? report.environments : report.projects,
-              "disk",
-              project ? "دیسک به تفکیک محیط" : "دیسک به تفکیک پروژه",
-              "GB",
-            )}
-          </div>
-          <div className="graphs">
-            {chart(
-              report.operating_systems,
-              "machines",
-              "توزیع سیستم‌عامل",
-              "ماشین",
-            )}
-            {chart(
-              [...report.services]
-                .sort((a: any, b: any) => b.machines - a.machines)
-                .slice(0, 20),
-              "machines",
-              "۲۰ سرویس با بیشترین ماشین",
-              "ماشین",
-            )}
-          </div>
-          <section className="panel">
-            <h3>توزیع وضعیت گردش کار</h3>
-            {report.statuses.map((s: any) => (
-              <p key={s.status}>
-                {statusLabels[s.status]}: {number(s.machines)}
-              </p>
-            ))}
-          </section>
-          {table("جزئیات پروژه‌ها", report.projects, (r) => r.project__name)}
-          {table(
-            "جزئیات محیط‌ها",
-            report.environments,
-            (r) => `${r.project__name} / ${r.environment__name}`,
+              <div className="graphs">
+                {chart(
+                  report.operating_systems,
+                  "machines",
+                  "توزیع سیستم‌عامل",
+                  "ماشین",
+                )}
+                {chart(
+                  [...report.services]
+                    .sort((a: any, b: any) => b.machines - a.machines)
+                    .slice(0, 20),
+                  "machines",
+                  "۲۰ سرویس با بیشترین ماشین",
+                  "ماشین",
+                )}
+              </div>
+              <DonutChart
+                title="توزیع وضعیت گردش کار"
+                values={report.statuses.map((item: any) => ({
+                  label: statusLabels[item.status],
+                  value: item.machines,
+                }))}
+              />
+            </>
           )}
-          {table(
-            "سرویس‌ها و Applicationها",
-            report.services,
-            (r) => `${r.project__name} / ${r.application__name || "ثبت‌نشده"}`,
+          {reportTab === "groups" && (
+            <>
+              {table(
+                "جزئیات پروژه‌ها",
+                report.projects,
+                (r) => r.project__name,
+              )}
+              {table(
+                "جزئیات محیط‌ها",
+                report.environments,
+                (r) => `${r.project__name} / ${r.environment__name}`,
+              )}
+              {table(
+                "سرویس‌ها و Applicationها",
+                report.services,
+                (r) =>
+                  `${r.project__name} / ${r.application__name || "ثبت‌نشده"}`,
+              )}
+              {table(
+                "سیستم‌عامل‌ها",
+                report.operating_systems,
+                (r) => r.os || "ثبت‌نشده",
+              )}
+              {table(
+                "شبکه‌ها",
+                report.networks,
+                (r) =>
+                  `${r.project__name} / ${r.environment__name} / ${r.network || "ثبت‌نشده"}`,
+              )}
+            </>
           )}
-          {table(
-            "سیستم‌عامل‌ها",
-            report.operating_systems,
-            (r) => r.os || "ثبت‌نشده",
-          )}
-          {table(
-            "شبکه‌ها",
-            report.networks,
-            (r) =>
-              `${r.project__name} / ${r.environment__name} / ${r.network || "ثبت‌نشده"}`,
-          )}
-          <section className="panel">
-            <h3>جزئیات ماشین‌ها</h3>
-            <div className="tablewrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>پروژه</th>
-                    <th className="sticky">Server Name</th>
-                    <th>Environment</th>
-                    <th>Application</th>
-                    <th>VMs</th>
-                    <th>CPU (Core)</th>
-                    <th>RAM (GB)</th>
-                    {Array.from(
-                      {
-                        length: Math.max(
-                          0,
-                          ...report.machines.map((m: any) => m.disks.length),
-                        ),
-                      },
-                      (_, i) => (
-                        <th key={i}>Disk {i + 1} (GB)</th>
-                      ),
-                    )}
-                    <th>OS</th>
-                    <th>Network / VLAN</th>
-                    <th>Server IP Addr</th>
-                    <th>Subnet (CIDR)</th>
-                    <th>GW IP Addr</th>
-                    <th>Username</th>
-                    <th>وضعیت</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {report.machines.map((m: any) => (
-                    <tr key={m.id}>
-                      <td>{m.project_name}</td>
-                      <td className="sticky">{m.server_name}</td>
-                      <td>{m.environment_name}</td>
-                      <td>{m.application}</td>
-                      <td>{m.vms}</td>
-                      <td>{number(m.cpu)}</td>
-                      <td>{number(m.ram)}</td>
+          {reportTab === "machines" && (
+            <section className="panel">
+              <h3>جزئیات ماشین‌ها</h3>
+              <div className="tablewrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>پروژه</th>
+                      <th className="sticky">Server Name</th>
+                      <th>Environment</th>
+                      <th>Application</th>
+                      <th>VMs</th>
+                      <th>CPU (Core)</th>
+                      <th>RAM (GB)</th>
                       {Array.from(
                         {
                           length: Math.max(
                             0,
-                            ...report.machines.map(
-                              (row: any) => row.disks.length,
-                            ),
+                            ...report.machines.map((m: any) => m.disks.length),
                           ),
                         },
                         (_, i) => (
-                          <td key={i} title={m.disks[i]?.name}>
-                            {m.disks[i] ? number(m.disks[i].size) : "—"}
-                          </td>
+                          <th key={i}>Disk {i + 1} (GB)</th>
                         ),
                       )}
-                      <td>{m.os}</td>
-                      <td>{m.network}</td>
-                      <td>{m.ip}</td>
-                      <td>{m.subnet}</td>
-                      <td>{m.gateway}</td>
-                      <td>{m.username}</td>
-                      <td>{statusLabels[m.status]}</td>
+                      <th>OS</th>
+                      <th>Network / VLAN</th>
+                      <th>Server IP Addr</th>
+                      <th>Subnet (CIDR)</th>
+                      <th>GW IP Addr</th>
+                      <th>Username</th>
+                      <th>وضعیت</th>
                     </tr>
+                  </thead>
+                  <tbody>
+                    {report.machines.map((m: any) => (
+                      <tr key={m.id}>
+                        <td>{m.project_name}</td>
+                        <td className="sticky">{m.server_name}</td>
+                        <td>{m.environment_name}</td>
+                        <td>{m.application}</td>
+                        <td>{m.vms}</td>
+                        <td>{number(m.cpu)}</td>
+                        <td>{number(m.ram)}</td>
+                        {Array.from(
+                          {
+                            length: Math.max(
+                              0,
+                              ...report.machines.map(
+                                (row: any) => row.disks.length,
+                              ),
+                            ),
+                          },
+                          (_, i) => (
+                            <td key={i} title={m.disks[i]?.name}>
+                              {m.disks[i] ? number(m.disks[i].size) : "—"}
+                            </td>
+                          ),
+                        )}
+                        <td>{m.os}</td>
+                        <td>{m.network}</td>
+                        <td>{m.ip}</td>
+                        <td>{m.subnet}</td>
+                        <td>{m.gateway}</td>
+                        <td>{m.username}</td>
+                        <td>{statusLabels[m.status]}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <Pager
+                page={report.page}
+                pages={report.pages}
+                count={report.totals.machines}
+                size={detailSize}
+                onPage={setDetailPage}
+                onSize={(value) => {
+                  setDetailSize(value);
+                  setDetailPage(1);
+                }}
+              />
+            </section>
+          )}
+          {reportTab === "quality" && (
+            <>
+              <section className="panel">
+                <h3>کیفیت تکمیل موجودی</h3>
+                <div className="quality-grid">
+                  {Object.entries({
+                    missing_ip: "IP ثبت‌نشده",
+                    missing_subnet: "Subnet ثبت‌نشده",
+                    missing_os: "OS ثبت‌نشده",
+                    missing_application: "Application ثبت‌نشده",
+                    without_disks: "ماشین بدون دیسک",
+                    zero_resources: "CPU یا RAM صفر",
+                    duplicate_ip_contexts: "گروه IP تکراری در پروژه/محیط/شبکه",
+                  }).map(([key, title]) => (
+                    <MetricCard
+                      key={key}
+                      label={title}
+                      value={report.quality[key]}
+                      tone={report.quality[key] ? "amber" : "teal"}
+                    />
                   ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="pager">
-              <button
-                disabled={report.page <= 1}
-                onClick={() => setDetailPage((p) => p - 1)}
-              >
-                قبلی
-              </button>
-              <span>
-                صفحه {number(report.page)} از {number(report.pages)}
-              </span>
-              <button
-                disabled={report.page >= report.pages}
-                onClick={() => setDetailPage((p) => p + 1)}
-              >
-                بعدی
-              </button>
-            </div>
-          </section>
-          <section className="panel">
-            <h3>کیفیت تکمیل موجودی</h3>
-            {Object.entries({
-              missing_ip: "IP ثبت‌نشده",
-              missing_subnet: "Subnet ثبت‌نشده",
-              missing_os: "OS ثبت‌نشده",
-              missing_application: "Application ثبت‌نشده",
-              without_disks: "ماشین بدون دیسک",
-              zero_resources: "CPU یا RAM صفر",
-              duplicate_ip_contexts: "گروه IP تکراری در پروژه/محیط/شبکه",
-            }).map(([key, title]) => (
-              <p key={key}>
-                {title}: {number(report.quality[key])}
-              </p>
-            ))}
-          </section>
-          <section className="panel">
-            <h3>فعالیت ۳۰ روز اخیر</h3>
-            {report.activity_30_days.map((row: any, i: number) => (
-              <p key={i}>
-                {row.event} · {row.source}: {number(row.count)}
-              </p>
-            ))}
-            {!report.activity_30_days.length && <p>فعالیتی ثبت نشده است.</p>}
-          </section>
+                </div>
+              </section>
+              <section className="panel">
+                <h3>فعالیت ۳۰ روز اخیر</h3>
+                {report.activity_30_days.map((row: any, i: number) => (
+                  <p key={i}>
+                    {row.event} · {row.source}: {number(row.count)}
+                  </p>
+                ))}
+                {!report.activity_30_days.length && (
+                  <p>فعالیتی ثبت نشده است.</p>
+                )}
+              </section>
+            </>
+          )}
         </>
       )}
       <Exports

@@ -10,10 +10,48 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
-from .models import SystemSetting, UpdateRun
+from .models import SystemSetting, UpdateRun, UpdateUpload
 from .security import audit, global_require
 
 SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
+
+
+def receive_upload(user, upload):
+    import tempfile, uuid
+    from .update_bundle import inspect_bundle, MAX_BUNDLE
+    global_require(user, 'perform_updates')
+    if not settings.UPDATE_EXECUTION_ENABLED or not settings.RELEASE_PUBLIC_KEY:
+        raise ValidationError('بارگذاری به‌روزرسانی روی این سرور فعال نیست')
+    if not upload or not upload.name.lower().endswith('.zip') or upload.size > MAX_BUNDLE:
+        raise ValidationError('یک بسته ZIP امضاشده با حجم حداکثر ۲ گیگابایت انتخاب کنید')
+    folder = settings.MEDIA_ROOT / 'updates'
+    folder.mkdir(parents=True, mode=0o700, exist_ok=True)
+    identifier = uuid.uuid4()
+    path = folder / f'{identifier.hex}.zip'
+    try:
+        # Serialize receivers and worker claims: at most one pending package.
+        with transaction.atomic():
+            SystemSetting.objects.get_or_create(key='update_lock', defaults={'value': {}})
+            SystemSetting.objects.select_for_update().get(key='update_lock')
+            if UpdateUpload.objects.filter(status__in=['pending', 'processing']).exists() or UpdateRun.objects.filter(status__in=['queued', 'running']).exists():
+                raise ValidationError('یک بسته در حال بررسی یا نصب است')
+            with path.open('xb') as stream:
+                for chunk in upload.chunks():
+                    stream.write(chunk)
+            path.chmod(0o600)
+            try:
+                metadata = inspect_bundle(path, settings.RELEASE_PUBLIC_KEY)
+            except Exception:
+                raise ValidationError('امضا، ساختار یا محتوای بسته معتبر نیست')
+            if tuple(map(int, metadata['version'].split('.'))) <= tuple(map(int, version().split('.'))):
+                raise ValidationError('نسخه بسته باید از نسخه نصب‌شده جدیدتر باشد')
+            job = UpdateUpload.objects.create(id=identifier, user=user, version=metadata['version'], sha256=metadata['sha256'])
+            audit(user, 'update_uploaded', job.id, version=job.version)
+            return job
+    except Exception:
+        path.unlink(missing_ok=True)
+        audit(user, 'update_upload_failed', reason='package_rejected')
+        raise
 
 
 def version():

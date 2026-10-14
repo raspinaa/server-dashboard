@@ -14,6 +14,20 @@ export function csrf() {
       ?.split("=")[1] || ""
   );
 }
+export function errorMessage(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value.map(errorMessage).join(" · ");
+  if (value && typeof value === "object")
+    return Object.entries(value)
+      .map(
+        ([key, item]) =>
+          (key === "detail" || key === "non_field_errors"
+            ? ""
+            : (fields[key] || key) + ": ") + errorMessage(item),
+      )
+      .join(" · ");
+  return "خطای ارتباط با سرور";
+}
 export async function api<T = any>(
   path: string,
   method = "GET",
@@ -37,7 +51,7 @@ export async function api<T = any>(
   if (!r.ok) {
     let message = "خطای ارتباط با سرور";
     try {
-      message = JSON.stringify(await r.json());
+      message = errorMessage(await r.json());
     } catch {}
     throw new ApiError(r.status, message);
   }
@@ -50,7 +64,7 @@ export async function download(path: string, data: unknown) {
     headers: { "Content-Type": "application/json", "X-CSRFToken": csrf() },
     body: JSON.stringify(data),
   });
-  if (!r.ok) throw new ApiError(r.status, JSON.stringify(await r.json()));
+  if (!r.ok) throw new ApiError(r.status, errorMessage(await r.json()));
   const url = URL.createObjectURL(await r.blob());
   const a = document.createElement("a");
   a.href = url;
