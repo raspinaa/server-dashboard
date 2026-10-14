@@ -18,6 +18,8 @@ class Project(models.Model):
     description = models.TextField(blank=True)
     vcenter_path = models.CharField(max_length=500, blank=True)
     archived = models.BooleanField(default=False)
+    deleted_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    deleted_by = models.ForeignKey(User, on_delete=models.PROTECT, null=True, blank=True, related_name='deleted_projects')
     version = models.PositiveIntegerField(default=1)
     created_by = models.ForeignKey(
         User, on_delete=models.PROTECT, related_name="created_projects"

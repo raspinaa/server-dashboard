@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.2
+
+- Complete multiline chart labels across the dashboard and management reports.
+- Explicit XLSX destination selection and project navigation without a header selector.
+- Password-confirmed project removal with an independent manager permission, rate limiting, scoped exclusion and retained audit/inventory records.
+
+## 0.3.1
+
+- Simplify login labels, show the packaged version and add a responsive infrastructure network gradient background.
+
 ## 0.3.0
 
 - Global infrastructure landing dashboard and scoped project/VM navigation.
@@ -16,14 +26,14 @@
 - Empty resource values become zero; network addresses can remain empty.
 - Multiple addresses in manual editing and XLSX export; visible header logout and manual machine creation.
 
-## 0.2.0 — Unreleased
+## 0.2.0 â€” Unreleased
 
 - Offline-only application installation and updates from copied signed packages.
 - One-command online Debian preparation; bundles include images and hash-locked CLI wheels.
 - Local update staging/dashboard metadata, internal backend/database networks and a LAN-facing web bridge and no automatic image pulls.
-- Breaking deployment change: GitHub/commit updates and runtime Let’s Encrypt are removed from the supported path. Existing data/keys are preserved; prepare a signed offline bundle for upgrade.
+- Breaking deployment change: GitHub/commit updates and runtime Letâ€™s Encrypt are removed from the supported path. Existing data/keys are preserved; prepare a signed offline bundle for upgrade.
 
-## 0.1.0 — Unreleased
+## 0.1.0 â€” Unreleased
 
 - Scoped management reports, resource graphs, service breakdowns and project-selectable XLSX exports.
 - Host CLI for dated full backups, signed release or pinned-commit updates and explicit snapshot restore.

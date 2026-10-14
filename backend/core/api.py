@@ -238,6 +238,42 @@ def project_detail(request, pk):
     return Response(project_data(p, request.user))
 
 
+@api_view(['POST'])
+def project_delete(request, pk):
+    project = project_for(request.user, pk, 'manager', 'project_delete')
+    if request.data.get('version') != project.version:
+        raise Conflict()
+    password = request.data.get('password')
+    if not isinstance(password, str) or not password or len(password) > 4096:
+        raise ValidationError('رمز فعلی حساب خود را وارد کنید')
+    key = hashlib.sha256(f'project-delete:{request.user.pk}'.encode()).hexdigest()
+    # Returning a rejected confirmation commits its counter; no mutation precedes it.
+    with transaction.atomic():
+        attempt, _ = LoginAttempt.objects.get_or_create(key=key, defaults={'expires_at':timezone.now()+timedelta(minutes=15)})
+        attempt = LoginAttempt.objects.select_for_update().get(pk=attempt.pk)
+        if attempt.expires_at < timezone.now():
+            attempt.failures=0;attempt.expires_at=timezone.now()+timedelta(minutes=15)
+        if attempt.failures >= 5:
+            return Response({'detail':'تلاش‌های زیاد؛ ۱۵ دقیقه بعد تلاش کنید'}, status=429)
+        actor=User.objects.select_for_update().get(pk=request.user.pk)
+        require(actor, project, 'manager', 'project_delete')
+        if not actor.check_password(password):
+            attempt.failures+=1;attempt.save()
+            audit(actor, 'project_delete_denied', project.id, reason='password_confirmation_failed')
+            return Response({'detail':'رمز فعلی حساب نادرست است'}, status=400)
+        project = Project.objects.select_for_update().get(pk=project.pk)
+        if project.deleted_at is not None:
+            raise Conflict('پروژه قبلاً حذف شده است')
+        if request.data.get('version') != project.version:
+            raise Conflict()
+        attempt.delete()
+        project.deleted_at=timezone.now();project.deleted_by=actor
+        project.archived=True;project.version+=1;project.save()
+        audit(actor, 'project_deleted', project.id, name=project.name,
+              machines=project.machines.count(), environments=project.environments.count(), version=project.version)
+    return Response({'id':project.id, 'deleted':True})
+
+
 @api_view(["POST", "PATCH"])
 @transaction.atomic
 def environments(request, pk):

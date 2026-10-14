@@ -6,7 +6,7 @@ from .models import Machine, Disk, Activity, Project, Environment
 
 
 def management_report(projects, project=None, environment=None, page=1, page_size=50, include_details=True):
-    projects = projects.filter(archived=False)
+    projects = projects.filter(archived=False, deleted_at__isnull=True)
     if project is not None:
         projects = projects.filter(pk=project.pk)
     rows = Machine.objects.filter(project__in=projects, archived=False)

@@ -162,7 +162,10 @@ export function BarChart({
         <div className="chart-bars">
           {values.map((v, i) => (
             <div className="barrow" key={i}>
-              <span title={v.label}>{v.label}</span>
+              <span className="chart-bar-label" dir="auto">
+                {v.label}
+              </span>
+              <strong>{number(v.value)}</strong>
               <div className="bartrack">
                 <i
                   style={{
@@ -171,7 +174,6 @@ export function BarChart({
                   }}
                 />
               </div>
-              <strong>{number(v.value)}</strong>
             </div>
           ))}
         </div>
@@ -238,7 +240,7 @@ export function DonutChart({
           {values.map((item, i) => (
             <div key={i}>
               <i style={{ background: `var(--chart-${(i % 5) + 1})` }} />
-              <span>{item.label}</span>
+              <span dir="auto">{item.label}</span>
               <strong>{number(item.value)}</strong>
             </div>
           ))}

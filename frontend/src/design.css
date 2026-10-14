@@ -940,11 +940,32 @@ details[open] > summary {
     grid-template-columns: 1fr;
   }
 }
-.audit-meta {display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin:0}
-.audit-meta>div {padding:12px;background:var(--soft);border-radius:9px}
-.audit-meta dt {font-size:11px;color:var(--muted)}
-.audit-meta dd {margin:4px 0 0;overflow-wrap:anywhere;font-size:12px}
-.audit-detail table td {white-space:normal;overflow-wrap:anywhere;max-width:360px;line-height:1.9}
+.audit-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+.audit-meta > div {
+  padding: 12px;
+  background: var(--soft);
+  border-radius: 9px;
+}
+.audit-meta dt {
+  font-size: 11px;
+  color: var(--muted);
+}
+.audit-meta dd {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.audit-detail table td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  max-width: 360px;
+  line-height: 1.9;
+}
 
 .permissiongrid {
   display: grid;
@@ -1027,5 +1048,200 @@ details[open] > summary {
   .sidebar-projects button {
     white-space: nowrap;
     flex-shrink: 0;
+  }
+}
+
+.login-screen {
+  position: relative;
+  isolation: isolate;
+  min-height: 100svh;
+  display: grid;
+  place-items: center;
+  padding: 40px 24px;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse at 18% 20%, #24589070, transparent 48%),
+    radial-gradient(ellipse at 88% 82%, #117b8570, transparent 46%),
+    linear-gradient(135deg, #09182e, #15345b 55%, #0b253e);
+}
+.login-network {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  color: #92bee8;
+  opacity: 0.36;
+  pointer-events: none;
+}
+.login-screen .login {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 440px;
+  margin: 0;
+  padding: 40px 38px;
+  background: linear-gradient(155deg, #fff, #f4f7fc);
+  border: 1px solid #ffffffb0;
+  box-shadow:
+    0 28px 80px #030f2960,
+    0 0 0 7px #ffffff07;
+  border-radius: 22px;
+  color: #17263f;
+}
+.login-screen .brand {
+  color: #172b4a;
+  font-size: 27px;
+}
+.login-screen .brand svg {
+  color: #416fe0;
+}
+.login-screen h1 {
+  text-align: center;
+  margin: 28px 0 30px;
+  font-size: 22px;
+  font-weight: 740;
+}
+.login-screen label {
+  font-size: 13px;
+  color: #52637c;
+}
+.login-screen input {
+  background: #fff;
+  border-color: #dce4f0;
+  color: #17263f;
+}
+.login-screen form {
+  gap: 20px;
+}
+.login-screen form > button {
+  margin-top: 5px;
+  min-height: 48px;
+  font-size: 14px;
+  border-radius: 11px;
+  background: linear-gradient(110deg, #365fd4, #246b9c);
+  box-shadow: 0 6px 18px #325ab529;
+}
+.login-screen .app-version {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid #dce4f0;
+  color: #77849a;
+  font-size: 11px;
+}
+.app-version b {
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid #dbe5f5;
+  background: #edf2fc;
+  color: #43628f;
+  border-radius: 6px;
+  padding: 2px 9px;
+}
+@media (max-width: 760px) {
+  .login-screen {
+    padding: 28px 20px;
+  }
+  .login-screen .login {
+    padding: 32px 26px;
+    max-width: 410px;
+  }
+  .login-network {
+    opacity: 0.24;
+  }
+  .login-screen h1 {
+    margin: 24px 0;
+  }
+  .login-screen .brand {
+    font-size: 25px;
+  }
+}
+
+/* Chart labels are content: always show their complete text above the bars. */
+.chart-bars .barrow {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 14px;
+  align-items: start;
+}
+.chart-bars .barrow > .chart-bar-label {
+  width: auto;
+  min-width: 0;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.85;
+}
+.chart-bars .barrow > .bartrack {
+  grid-column: 1/-1;
+  width: 100%;
+}
+.chart-bars .barrow > strong {
+  white-space: nowrap;
+  margin: 0;
+  line-height: 1.85;
+  min-width: 48px;
+}
+.graphs button.barrow {
+  grid-template-columns: minmax(0, 1fr) auto;
+  color: var(--text);
+  padding: 8px 0;
+  min-height: auto;
+}
+.graphs button.barrow > span {
+  width: auto;
+  grid-column: 1/-1;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+  line-height: 1.85;
+  text-align: right;
+}
+.graphs button.barrow > .bartrack {
+  min-width: 0;
+}
+.graphs button.barrow > b {
+  min-width: 48px;
+  text-align: left;
+}
+.chart-heading h3,
+.chart-card h3 {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.chart-legend {
+  min-width: 0;
+}
+.chart-legend > div {
+  min-width: 0;
+  align-items: start;
+}
+.chart-legend span {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  min-width: 0;
+  flex: 1;
+}
+.chart-legend i,
+.chart-legend strong {
+  flex-shrink: 0;
+}
+.chart-legend i {
+  margin-top: 6px;
+}
+.donut-layout {
+  grid-template-columns: 180px minmax(0, 1fr);
+}
+.delete-project-name {
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 1100px) {
+  .donut-layout {
+    grid-template-columns: 140px minmax(0, 1fr);
   }
 }

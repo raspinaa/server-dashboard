@@ -248,22 +248,18 @@ export function Dashboard({
         <BarChart
           title="توزیع سیستم‌عامل‌ها"
           unit="ماشین"
-          values={report.operating_systems
-            .slice(0, 12)
-            .map((item: any) => ({
-              label: item.os || "ثبت‌نشده",
-              value: item.machines,
-            }))}
+          values={report.operating_systems.slice(0, 12).map((item: any) => ({
+            label: item.os || "ثبت‌نشده",
+            value: item.machines,
+          }))}
         />
         <BarChart
           title="محیط‌های زیرساخت"
           unit="ماشین"
-          values={report.environments
-            .slice(0, 12)
-            .map((item: any) => ({
-              label: `${item.project__name} / ${item.environment__name}`,
-              value: item.machines,
-            }))}
+          values={report.environments.slice(0, 12).map((item: any) => ({
+            label: `${item.project__name} / ${item.environment__name}`,
+            value: item.machines,
+          }))}
         />
       </div>
     </>
@@ -379,6 +375,103 @@ export function PasswordDialog({
             <button type="button" className="ghost" onClick={close}>
               بستن
             </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+export function DeleteProjectDialog({
+  project,
+  run,
+  close,
+  done,
+}: {
+  project: { id: number; name: string; version: number };
+  run: Run;
+  close: () => void;
+  done: () => Promise<void>;
+}) {
+  const [error, setError] = useState("");
+  const dialog = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const before = document.activeElement as HTMLElement;
+    dialog.current?.querySelector<HTMLInputElement>("input")?.focus();
+    const key = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+      if (event.key === "Tab") {
+        const items = Array.from(
+          dialog.current?.querySelectorAll<HTMLElement>("input,button") || [],
+        );
+        if (event.shiftKey && document.activeElement === items[0]) {
+          event.preventDefault();
+          items.at(-1)?.focus();
+        } else if (!event.shiftKey && document.activeElement === items.at(-1)) {
+          event.preventDefault();
+          items[0]?.focus();
+        }
+      }
+    };
+    document.addEventListener("keydown", key);
+    return () => {
+      document.removeEventListener("keydown", key);
+      before?.focus();
+    };
+  }, []);
+  return (
+    <div className="modal-backdrop">
+      <div
+        className="modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-label="تأیید حذف پروژه"
+        ref={dialog}
+      >
+        <SectionHeading title="حذف پروژه" />
+        <p className="delete-project-name">{project.name}</p>
+        <p className="muted">
+          پروژه و موجودی آن از فهرست‌ها و گزارش‌ها خارج می‌شوند. سوابق برای
+          ردیابی نگهداری می‌شوند. برای تأیید، رمز فعلی حساب خود را وارد کنید.
+        </p>
+        {error && (
+          <div role="alert" className="error">
+            {error}
+          </div>
+        )}
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            const data = new FormData(event.currentTarget);
+            setError("");
+            run(async () => {
+              try {
+                await api(`projects/${project.id}/delete/`, "POST", {
+                  version: project.version,
+                  password: data.get("password"),
+                });
+                await done();
+              } catch (error) {
+                setError((error as Error).message);
+              }
+            });
+          }}
+        >
+          <label>
+            رمز فعلی حساب
+            <input
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              required
+              maxLength={4096}
+            />
+          </label>
+          <div className="actions">
+            <button type="button" className="ghost" onClick={close}>
+              انصراف
+            </button>
+            <button className="danger">تأیید حذف پروژه</button>
           </div>
         </form>
       </div>

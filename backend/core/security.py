@@ -15,15 +15,17 @@ PROJECT_PERMISSIONS = {
     "credential_view",
     "credential_edit",
     "credential_export",
+    "project_delete",
 }
 GLOBAL_PERMISSIONS = {"manage_users", "auth_settings", "audit_view", "perform_updates"}
 
 
 def scope(user):
     """Queryset مجاز؛ برای جلوگیری از افشای رکوردهای پروژه‌های دیگر قبل از lookup استفاده شود."""
+    projects = Project.objects.filter(deleted_at__isnull=True)
     if user.is_superuser:
-        return Project.objects.all()
-    return Project.objects.filter(membership__user=user)
+        return projects
+    return projects.filter(membership__user=user)
 
 
 def require(user, project, role="viewer", permission=None):

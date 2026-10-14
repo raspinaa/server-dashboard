@@ -5,6 +5,7 @@
  */
 import React, { useEffect, useState, useRef, useId, Fragment } from "react";
 import { createRoot } from "react-dom/client";
+import { version as appVersion } from "../package.json";
 import {
   api,
   download,
@@ -32,6 +33,7 @@ import {
   PasswordDialog,
   ProjectPicker,
   ProjectSelector,
+  DeleteProjectDialog,
 } from "./pages";
 type Env = { id: number; name: string; archived: boolean; version: number };
 type Project = {
@@ -91,6 +93,7 @@ const permLabels: Record<string, string> = {
   auth_settings: "تنظیم احراز هویت",
   audit_view: "رویدادهای عمومی",
   perform_updates: "به‌روزرسانی برنامه",
+  project_delete: "حذف پروژه (نیازمند نقش مدیر پروژه)",
 };
 const dirtyEditors = new Set<string>();
 function navigate() {
@@ -114,6 +117,7 @@ function App() {
     [boot, setBoot] = useState(true),
     [projects, setProjects] = useState<Project[]>([]),
     [pid, setPid] = useState<number>(0),
+    [importPid, setImportPid] = useState(0),
     [section, setSection] = useState("dashboard"),
     [error, setError] = useState(""),
     [success, setSuccess] = useState(""),
@@ -123,6 +127,7 @@ function App() {
     [passwordOpen, setPasswordOpen] = useState(false);
   const sessionGeneration = useRef(0);
   const project = projects.find((p) => p.id === pid);
+  const importProject = projects.find((p) => p.id === importPid);
   const refresh = async () => {
     const generation = sessionGeneration.current;
     const [ps, session] = await Promise.all([
@@ -133,6 +138,9 @@ function App() {
     setProjects(ps);
     setUser(session.user);
     setPid((old) => (ps.some((p) => p.id === old) ? old : 0));
+    setImportPid((old) =>
+      ps.some((p) => p.id === old && !p.archived) ? old : 0,
+    );
     setEpoch((e) => e + 1);
   };
   const run = async (fn: () => Promise<void>) => {
@@ -173,49 +181,127 @@ function App() {
     );
   if (!user)
     return (
-      <main className="login">
-        <div className="brand">
-          <Icon name="inventory" size={32} />
-          <span>Infra-HUB</span>
-        </div>
-        <h1>ورود به فضای مدیریت موجودی</h1>
-        <p>داده‌های پروژه؛ از Excel تا همکاری تیمی</p>
-        {error && (
-          <p role="alert" className="error">
-            {error}
-          </p>
-        )}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            const f = new FormData(e.currentTarget);
-            run(async () => {
-              const s = await api("login/", "POST", Object.fromEntries(f));
-              sessionGeneration.current++;
-              setUser(s.user);
-              setSection("dashboard");
-              await refresh();
-            });
-          }}
+      <div className="login-screen">
+        <svg
+          className="login-network"
+          viewBox="0 0 1440 900"
+          preserveAspectRatio="xMidYMid slice"
+          aria-hidden="true"
         >
-          <label>
-            نام کاربری
-            <input name="username" autoComplete="username" required dir="ltr" />
-          </label>
-          <label>
-            رمز عبور
-            <input
-              name="password"
-              type="password"
-              autoComplete="current-password"
-              required
-              dir="ltr"
+          <defs>
+            <pattern
+              id="network-grid"
+              width="48"
+              height="48"
+              patternUnits="userSpaceOnUse"
+            >
+              <path
+                d="M48 0H0V48"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth=".5"
+              />
+            </pattern>
+          </defs>
+          <rect
+            width="1440"
+            height="900"
+            fill="url(#network-grid)"
+            opacity=".22"
+          />
+          <g fill="none" stroke="currentColor" strokeWidth="1.3">
+            <path d="M90 200H270L370 300V460H510M90 640H250L370 520V460M270 200V110H570M1150 180H1290V360L1160 490H1030M1290 360H1380M1160 490V690H1280M1030 690H1160M250 640V790H570M90 200V360H170" />
+            <path
+              d="M900 110H1150V180M890 790H1030V690"
+              strokeDasharray="5 8"
             />
-          </label>
-          <button disabled={busy}>ورود امن</button>
-        </form>
-        <small>مدیریت یکپارچه پروژه‌ها، ماشین‌ها و منابع زیرساخت</small>
-      </main>
+            {[
+              [90, 200],
+              [270, 200],
+              [370, 460],
+              [250, 640],
+              [170, 360],
+              [1150, 180],
+              [1290, 360],
+              [1160, 490],
+              [1160, 690],
+              [1030, 690],
+            ].map(([x, y], i) => (
+              <g key={i}>
+                <circle cx={x} cy={y} r="7" fill="#15365d" />
+                <circle cx={x} cy={y} r="16" opacity=".35" />
+              </g>
+            ))}
+            <g transform="translate(90 390)">
+              {[0, 48, 96].map((y) => (
+                <g key={y}>
+                  <rect y={y} width="130" height="34" rx="6" />
+                  <circle cx="17" cy={y + 17} r="3" />
+                  <path d={`M38 ${y + 17}H108`} />
+                </g>
+              ))}
+            </g>
+            <g transform="translate(1230 555)">
+              {[0, 48, 96].map((y) => (
+                <g key={y}>
+                  <rect y={y} width="120" height="34" rx="6" />
+                  <circle cx="16" cy={y + 17} r="3" />
+                  <path d={`M36 ${y + 17}H100`} />
+                </g>
+              ))}
+            </g>
+          </g>
+        </svg>
+        <main className="login">
+          <div className="brand">
+            <Icon name="inventory" size={32} />
+            <span>Infra-HUB</span>
+          </div>
+          <h1>ورود به سامانه</h1>
+          {error && (
+            <p role="alert" className="error">
+              {error}
+            </p>
+          )}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const f = new FormData(e.currentTarget);
+              run(async () => {
+                const s = await api("login/", "POST", Object.fromEntries(f));
+                sessionGeneration.current++;
+                setUser(s.user);
+                setSection("dashboard");
+                await refresh();
+              });
+            }}
+          >
+            <label>
+              نام کاربری
+              <input
+                name="username"
+                autoComplete="username"
+                required
+                dir="ltr"
+              />
+            </label>
+            <label>
+              رمز عبور
+              <input
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                required
+                dir="ltr"
+              />
+            </label>
+            <button disabled={busy}>ورود به سامانه</button>
+          </form>
+          <small className="app-version">
+            نسخهٔ سامانه <b dir="ltr">{appVersion}</b>
+          </small>
+        </main>
+      </div>
     );
   return (
     <div className="shell">
@@ -247,6 +333,7 @@ function App() {
                 className={section === k ? "active" : ""}
                 onClick={() => {
                   if (!navigate()) return;
+                  if (k === "imports" && section !== "imports") setImportPid(0);
                   setSection(k);
                   setError("");
                   setSuccess("");
@@ -321,6 +408,7 @@ function App() {
                       setUser(null);
                       setProjects([]);
                       setPid(0);
+                      setImportPid(0);
                       setSection("dashboard");
                     });
                   }}
@@ -329,26 +417,6 @@ function App() {
                 </button>
               </div>
             </details>
-            {section === "inventory" && (
-              <label className="compact">
-                پروژه
-                <select
-                  aria-label="انتخاب پروژه"
-                  value={pid}
-                  onChange={(e) => {
-                    if (navigate()) setPid(Number(e.target.value));
-                  }}
-                >
-                  <option value={0}>انتخاب پروژه</option>
-                  {projects.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                      {p.archived ? " (بایگانی)" : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
             <button
               className="ghost"
               aria-label="تغییر ظاهر"
@@ -420,15 +488,15 @@ function App() {
                 projects={projects.filter(
                   (p) => p.role === "manager" && !p.archived,
                 )}
-                value={pid}
+                value={importPid}
                 select={(id) => {
-                  if (navigate()) setPid(id);
+                  if (navigate()) setImportPid(id);
                 }}
               />
-              {project?.role === "manager" && !project.archived ? (
+              {importProject?.role === "manager" && !importProject.archived ? (
                 <Imports
-                  key={project.id}
-                  project={project}
+                  key={importProject.id}
+                  project={importProject}
                   run={run}
                   refresh={refresh}
                   notice={setSuccess}
@@ -506,8 +574,22 @@ function Projects({
 }) {
   const [selected, setSelected] = useState<Project | null>(null);
   const [open, setOpen] = useState(false);
+  const [deleting, setDeleting] = useState<Project | null>(null);
   return (
     <>
+      {deleting && (
+        <DeleteProjectDialog
+          project={deleting}
+          run={run}
+          close={() => setDeleting(null)}
+          done={async () => {
+            setDeleting(null);
+            setSelected(null);
+            setOpen(false);
+            await refresh();
+          }}
+        />
+      )}
       <section className="panel">
         <SectionHeading
           title={selected ? "ویرایش پروژه" : "تعریف پروژه"}
@@ -584,6 +666,15 @@ function Projects({
             )}
             <div className="wide actions">
               <button>ذخیره پروژه</button>
+              {selected?.permissions.includes("project_delete") && (
+                <button
+                  type="button"
+                  className="danger"
+                  onClick={() => setDeleting(selected)}
+                >
+                  حذف پروژه
+                </button>
+              )}
               {selected && (
                 <button
                   type="button"

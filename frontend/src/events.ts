@@ -10,6 +10,8 @@ export const eventLabels: Record<string, string> = {
   machine_updated: "ویرایش ماشین",
   project_created: "تعریف پروژه",
   project_updated: "ویرایش پروژه",
+  project_deleted: "حذف پروژه",
+  project_delete_denied: "تأیید ناموفق حذف پروژه",
   environment_saved: "ذخیره محیط",
   membership_saved: "تغییر عضویت پروژه",
   user_saved: "ذخیره حساب کاربری",
